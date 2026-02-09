@@ -28,7 +28,7 @@ Unity Editor에서 Window > Package Manager를 열고, `+` 버튼 > **Add packag
 
 Open Unity Editor, go to Window > Package Manager, click `+` > **Add package from git URL**, and enter:
 ```
-https://github.com/YOUR_USERNAME/unity-shader-mcp.git?path=unity-package
+https://github.com/KULEEEE/Claude-Code-For-Unity-Shader.git?path=unity-package
 ```
 
 또는 로컬 설치 / Or install from disk:
@@ -41,7 +41,7 @@ Claude Code에서 아래 명령어를 실행합니다 (빌드 불필요, 번들 
 Run these commands in Claude Code (no build needed, bundled file included):
 
 ```bash
-/plugin marketplace add YOUR_USERNAME/unity-shader-mcp
+/plugin marketplace add KULEEEE/Claude-Code-For-Unity-Shader
 /plugin install unity-shader-tools@unity-shader-mcp
 ```
 
