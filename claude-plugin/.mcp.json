@@ -1,0 +1,8 @@
+{
+  "mcpServers": {
+    "unity-shader": {
+      "command": "node",
+      "args": ["${CLAUDE_PLUGIN_ROOT}/servers/shader-mcp-server/dist/server.mjs"]
+    }
+  }
+}

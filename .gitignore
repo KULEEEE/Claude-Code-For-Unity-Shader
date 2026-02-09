@@ -1,0 +1,32 @@
+# Node.js
+node_modules/
+npm-debug.log*
+
+# TypeScript build output (source is bundled into dist/)
+claude-plugin/servers/shader-mcp-server/build/
+
+# OS files
+.DS_Store
+Thumbs.db
+Desktop.ini
+nul
+
+# IDE
+.vs/
+.vscode/
+.idea/
+*.suo
+*.user
+*.sln.docstates
+
+# Claude Code local settings
+.claude/
+
+# Unity generated (not needed for this repo)
+Library/
+Temp/
+obj/
+Logs/
+UserSettings/
+*.csproj
+*.sln
