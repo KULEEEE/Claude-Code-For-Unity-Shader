@@ -1,0 +1,20 @@
+{
+  "name": "unity-shader-marketplace",
+  "owner": {
+    "name": "ShaderMCP",
+    "email": "shader-mcp@local"
+  },
+  "metadata": {
+    "description": "Unity Shader MCP Tools - shader analysis and compilation via MCP",
+    "version": "0.1.0"
+  },
+  "plugins": [
+    {
+      "name": "unity-shader-tools",
+      "description": "Unity shader analysis, compilation, variant analysis, and material inspection tools via MCP",
+      "source": "./claude-plugin",
+      "category": "development",
+      "tags": ["unity", "shader", "mcp", "hlsl", "game-dev"]
+    }
+  ]
+}

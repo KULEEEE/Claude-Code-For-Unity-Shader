@@ -1,0 +1,19 @@
+{
+  "name": "com.shader-mcp.bridge",
+  "version": "0.1.0",
+  "displayName": "Shader MCP Bridge",
+  "description": "Unity Editor plugin that exposes shader analysis tools via WebSocket for MCP integration with Claude Code.",
+  "unity": "2021.3",
+  "keywords": [
+    "shader",
+    "mcp",
+    "claude",
+    "tools",
+    "ai"
+  ],
+  "author": {
+    "name": "Shader MCP",
+    "url": "https://github.com/shader-mcp/unity-shader-mcp"
+  },
+  "license": "MIT"
+}
