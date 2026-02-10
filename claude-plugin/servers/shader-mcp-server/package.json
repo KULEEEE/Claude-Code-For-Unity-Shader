@@ -1,15 +1,45 @@
 {
   "name": "shader-mcp-server",
   "version": "0.1.0",
-  "description": "MCP server for Unity shader analysis tools",
+  "description": "MCP server for Unity shader analysis tools - connects Unity Editor to AI coding assistants via Model Context Protocol",
   "type": "module",
-  "main": "build/index.js",
+  "main": "dist/server.mjs",
+  "bin": {
+    "shader-mcp-server": "dist/server.mjs"
+  },
+  "files": [
+    "dist/server.mjs"
+  ],
   "scripts": {
     "build": "tsc",
-    "bundle": "esbuild build/index.js --bundle --platform=node --target=node18 --format=esm --outfile=dist/server.mjs --banner:js=\"import{createRequire}from'module';const require=createRequire(import.meta.url);\"",
+    "bundle": "esbuild build/index.js --bundle --platform=node --target=node18 --format=esm --outfile=dist/server.mjs --banner:js=\"#!/usr/bin/env node\nimport{createRequire}from'module';const require=createRequire(import.meta.url);\"",
     "watch": "tsc --watch",
     "start": "node dist/server.mjs",
-    "prepublish": "npm run build && npm run bundle"
+    "prepublishOnly": "npm run build && npm run bundle"
+  },
+  "keywords": [
+    "mcp",
+    "unity",
+    "shader",
+    "hlsl",
+    "model-context-protocol",
+    "game-dev",
+    "opencode",
+    "claude",
+    "cursor"
+  ],
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/KULEEEE/Claude-Code-For-Unity-Shader.git"
+  },
+  "homepage": "https://github.com/KULEEEE/Claude-Code-For-Unity-Shader#readme",
+  "bugs": {
+    "url": "https://github.com/KULEEEE/Claude-Code-For-Unity-Shader/issues"
+  },
+  "license": "MIT",
+  "author": "KULEEEE",
+  "engines": {
+    "node": ">=18"
   },
   "dependencies": {
     "@modelcontextprotocol/sdk": "^1.0.0",
