@@ -1,5 +1,5 @@
 #!/usr/bin/env node
-import{createRequire}from'module';const require=createRequire(import.meta.url);
+#!/usr/bin/env node
 var __create = Object.create;
 var __defProp = Object.defineProperty;
 var __getOwnPropDesc = Object.getOwnPropertyDescriptor;
