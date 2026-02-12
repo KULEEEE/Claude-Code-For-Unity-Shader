@@ -30945,7 +30945,7 @@ var ShaderLspClient = class {
       const command = isWindows ? `${SHADER_LS_COMMAND}.exe` : SHADER_LS_COMMAND;
       this.process = spawn(command, ["--stdio"], {
         stdio: ["pipe", "pipe", "pipe"],
-        env: { ...process.env },
+        env: { ...process.env, DOTNET_ROLL_FORWARD: "LatestMajor" },
         shell: isWindows
       });
       if (!this.process.pid) {
