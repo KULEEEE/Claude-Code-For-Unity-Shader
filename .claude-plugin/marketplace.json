@@ -6,7 +6,7 @@
   },
   "metadata": {
     "description": "Unity Shader MCP Tools - shader analysis, compilation, and LSP code intelligence via MCP",
-    "version": "0.1.2"
+    "version": "0.1.3"
   },
   "plugins": [
     {
