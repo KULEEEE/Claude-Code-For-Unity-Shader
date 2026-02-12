@@ -43,6 +43,7 @@
   },
   "dependencies": {
     "@modelcontextprotocol/sdk": "^1.0.0",
+    "vscode-languageserver-protocol": "^3.17.5",
     "ws": "^8.16.0",
     "zod": "^3.22.0"
   },
