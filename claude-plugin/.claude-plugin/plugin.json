@@ -1,7 +1,7 @@
 {
   "name": "unity-shader-tools",
-  "version": "0.1.0",
-  "description": "Unity shader analysis and compilation tools via MCP",
+  "version": "0.1.2",
+  "description": "Unity shader analysis, compilation, and LSP code intelligence tools via MCP",
   "mcpServers": {
     "unity-shader": {
       "command": "node",
