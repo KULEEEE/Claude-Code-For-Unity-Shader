@@ -15,7 +15,10 @@
 
 - **Unity** 2021.3 LTS or higher (Unity 6.0+ recommended)
 - **Node.js** 18+
-- **Claude Code** CLI
+- **AI Coding Assistant** (any one of the following):
+  - [Claude Code](https://claude.ai/claude-code) CLI
+  - [OpenCode](https://opencode.ai/)
+  - [Gemini CLI](https://geminicli.com/)
 
 ---
 
@@ -31,7 +34,11 @@ https://github.com/KULEEEE/Claude-Code-For-Unity-Shader.git?path=unity-package
 Or install from disk:
 Unity Package Manager > `+` > **Add package from disk** > `unity-package/package.json`
 
-### Step 2: Install Claude Code Plugin
+### Step 2: Install MCP Server
+
+Choose your preferred AI coding assistant:
+
+#### Option A: Claude Code
 
 Run these commands in Claude Code (no build needed, bundled file included):
 
@@ -41,6 +48,42 @@ Run these commands in Claude Code (no build needed, bundled file included):
 ```
 
 > **Note**: No `npm install` or `npm run build` required. A pre-bundled single file (`dist/server.mjs`) is included.
+
+#### Option B: OpenCode
+
+Add the following to your `opencode.json` (project root or `~/.config/opencode/opencode.json`):
+
+```json
+{
+  "$schema": "https://opencode.ai/config.json",
+  "mcp": {
+    "unity-shader-tools": {
+      "type": "local",
+      "command": ["node", "/path/to/Claude-Code-For-Unity-Shader/claude-plugin/servers/shader-mcp-server/dist/server.mjs"],
+      "enabled": true
+    }
+  }
+}
+```
+
+> Replace `/path/to/` with the actual path where you cloned this repository.
+
+#### Option C: Gemini CLI
+
+Add the following to your `settings.json` (`~/.gemini/settings.json` or `.gemini/settings.json` in your project):
+
+```json
+{
+  "mcpServers": {
+    "unity-shader-tools": {
+      "command": "node",
+      "args": ["/path/to/Claude-Code-For-Unity-Shader/claude-plugin/servers/shader-mcp-server/dist/server.mjs"]
+    }
+  }
+}
+```
+
+> Replace `/path/to/` with the actual path where you cloned this repository.
 
 ### Step 3: Verify Connection
 
