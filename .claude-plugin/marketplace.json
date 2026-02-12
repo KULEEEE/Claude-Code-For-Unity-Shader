@@ -5,13 +5,13 @@
     "email": "shader-mcp@local"
   },
   "metadata": {
-    "description": "Unity Shader MCP Tools - shader analysis and compilation via MCP",
-    "version": "0.1.0"
+    "description": "Unity Shader MCP Tools - shader analysis, compilation, and LSP code intelligence via MCP",
+    "version": "0.1.2"
   },
   "plugins": [
     {
       "name": "unity-shader-tools",
-      "description": "Unity shader analysis, compilation, variant analysis, and material inspection tools via MCP",
+      "description": "Unity shader analysis, compilation, variant analysis, material inspection, and LSP code intelligence (hover, completion, signature help) via MCP",
       "source": "./claude-plugin",
       "category": "development",
       "tags": ["unity", "shader", "mcp", "hlsl", "game-dev"]
