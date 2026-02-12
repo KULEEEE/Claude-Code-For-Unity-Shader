@@ -57,11 +57,11 @@ Add the following to your `opencode.json` (project root or `~/.config/opencode/o
 {
   "$schema": "https://opencode.ai/config.json",
   "mcp": {
-    "unity-shader-tools": {
-      "type": "local",
-      "command": ["node", "/path/to/Claude-Code-For-Unity-Shader/claude-plugin/servers/shader-mcp-server/dist/server.mjs"],
-      "enabled": true
-    }
+  "unity-shader": {
+    "type": "local",
+    "command": ["npx", "-y", "unity-shader-mcp"],
+    "enabled": true
+  }
   }
 }
 ```
@@ -75,9 +75,9 @@ Add the following to your `settings.json` (`~/.gemini/settings.json` or `.gemini
 ```json
 {
   "mcpServers": {
-    "unity-shader-tools": {
-      "command": "node",
-      "args": ["/path/to/Claude-Code-For-Unity-Shader/claude-plugin/servers/shader-mcp-server/dist/server.mjs"]
+    "unity-shader": {
+      "command": "npx",
+      "args": ["-y", "unity-shader-mcp", "shader-mcp-server"]
     }
   }
 }
