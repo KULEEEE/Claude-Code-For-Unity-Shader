@@ -23,7 +23,7 @@ export function registerShaderAnalyzeTools(
           content: [
             {
               type: "text" as const,
-              text: JSON.stringify(result, null, 2),
+              text: JSON.stringify(result ?? { error: "No response from Unity" }, null, 2),
             },
           ],
         };
@@ -59,7 +59,7 @@ export function registerShaderAnalyzeTools(
           content: [
             {
               type: "text" as const,
-              text: JSON.stringify(result, null, 2),
+              text: JSON.stringify(result ?? { error: "No response from Unity" }, null, 2),
             },
           ],
         };

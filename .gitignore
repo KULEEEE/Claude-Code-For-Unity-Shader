@@ -21,6 +21,13 @@ nul
 
 # Claude Code local settings
 .claude/
+CLAUDE.md
+
+# AI session files
+.hypeai-sessions.json
+
+# npm pack output
+*.tgz
 
 # Unity generated (not needed for this repo)
 Library/
