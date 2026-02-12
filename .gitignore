@@ -1,5 +1,6 @@
 # Node.js
 node_modules/
+!claude-plugin/servers/shader-mcp-server/node_modules/
 npm-debug.log*
 
 # TypeScript build output (source is bundled into dist/)
