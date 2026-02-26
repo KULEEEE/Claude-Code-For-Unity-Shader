@@ -31181,11 +31181,12 @@ async function handleAIQuery(request) {
   const fullPrompt = buildFullPrompt(request.prompt, request.shaderContext);
   return new Promise((resolve2) => {
     try {
-      const proc = spawn2("claude", ["-p", fullPrompt], {
-        timeout: 6e4,
-        // 60 second timeout
+      const proc = spawn2("claude", ["-p"], {
+        timeout: 12e4,
+        // 120 second timeout
         env: { ...process.env },
-        shell: true
+        shell: true,
+        stdio: ["pipe", "pipe", "pipe"]
       });
       let stdout = "";
       let stderr = "";
@@ -31213,6 +31214,8 @@ async function handleAIQuery(request) {
           error: `Failed to run Claude CLI: ${err.message}. Ensure 'claude' is in PATH.`
         });
       });
+      proc.stdin.write(fullPrompt);
+      proc.stdin.end();
     } catch (err) {
       const msg = err instanceof Error ? err.message : String(err);
       resolve2({ success: false, error: `Exception: ${msg}` });
@@ -31760,7 +31763,7 @@ function registerEditorPlatformResource(server, bridge) {
 async function main() {
   const server = new McpServer({
     name: "unity-shader-tools",
-    version: "0.1.4"
+    version: "0.1.5"
   });
   const bridge = new UnityBridge("ws://localhost:8090");
   const lspClient = new ShaderLspClient();

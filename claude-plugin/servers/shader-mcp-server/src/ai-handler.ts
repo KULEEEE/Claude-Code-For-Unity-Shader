@@ -14,16 +14,20 @@ interface AIResponse {
 /**
  * Handle an AI query by calling the Claude CLI (`claude -p`).
  * Uses the existing Claude Code authentication — no API key needed.
+ * Prompt is passed via stdin to avoid command-line length limits on Windows.
  */
 export async function handleAIQuery(request: AIRequest): Promise<AIResponse> {
   const fullPrompt = buildFullPrompt(request.prompt, request.shaderContext);
 
   return new Promise((resolve) => {
     try {
-      const proc = spawn("claude", ["-p", fullPrompt], {
-        timeout: 60000, // 60 second timeout
+      // Use stdin pipe to pass prompt — avoids Windows cmd length limits
+      // and special character escaping issues
+      const proc = spawn("claude", ["-p"], {
+        timeout: 120000, // 120 second timeout
         env: { ...process.env },
         shell: true,
+        stdio: ["pipe", "pipe", "pipe"],
       });
 
       let stdout = "";
@@ -41,7 +45,9 @@ export async function handleAIQuery(request: AIRequest): Promise<AIResponse> {
         if (code === 0) {
           resolve({ success: true, response: stdout.trim() });
         } else {
-          console.error(`[AI Handler] Claude exited with code ${code}: ${stderr}`);
+          console.error(
+            `[AI Handler] Claude exited with code ${code}: ${stderr}`
+          );
           resolve({
             success: false,
             error: `Claude exited with code ${code}. ${stderr.substring(0, 200)}`,
@@ -56,6 +62,10 @@ export async function handleAIQuery(request: AIRequest): Promise<AIResponse> {
           error: `Failed to run Claude CLI: ${err.message}. Ensure 'claude' is in PATH.`,
         });
       });
+
+      // Write prompt to stdin and close
+      proc.stdin.write(fullPrompt);
+      proc.stdin.end();
     } catch (err: unknown) {
       const msg = err instanceof Error ? err.message : String(err);
       resolve({ success: false, error: `Exception: ${msg}` });
