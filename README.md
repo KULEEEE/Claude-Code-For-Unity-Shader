@@ -51,12 +51,25 @@ The MCP server is published on npm as [`unity-shader-mcp`](https://www.npmjs.com
 
 Add to `.mcp.json` (project root or `~/.claude/.mcp.json`):
 
+**macOS / Linux:**
 ```json
 {
   "mcpServers": {
     "unity-shader": {
       "command": "npx",
       "args": ["-y", "unity-shader-mcp"]
+    }
+  }
+}
+```
+
+**Windows:**
+```json
+{
+  "mcpServers": {
+    "unity-shader": {
+      "command": "cmd",
+      "args": ["/c", "npx", "-y", "unity-shader-mcp"]
     }
   }
 }
