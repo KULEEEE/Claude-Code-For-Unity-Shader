@@ -141,13 +141,47 @@ export class UnityBridge {
     this.pendingRequests.clear();
   }
 
+  /**
+   * Register a handler for messages sent from Unity to the MCP server.
+   * Used for AI query requests (Unity → MCP → Claude CLI → MCP → Unity).
+   */
+  onMessage(handler: (msg: Record<string, unknown>) => void): void {
+    this._messageHandlers.push(handler);
+  }
+
+  private _messageHandlers: Array<(msg: Record<string, unknown>) => void> = [];
+
+  /**
+   * Send a raw message back to Unity (used for AI responses).
+   */
+  sendRaw(message: Record<string, unknown>): void {
+    if (!this.isConnected) {
+      console.error("[ShaderMCP] Cannot send: not connected");
+      return;
+    }
+    this.ws!.send(JSON.stringify(message));
+  }
+
   private handleMessage(raw: string): void {
     try {
       const msg = JSON.parse(raw);
+
+      // Check if this is an AI query from Unity (reverse direction)
+      if (msg.method === "ai/query") {
+        for (const handler of this._messageHandlers) {
+          handler(msg);
+        }
+        return;
+      }
+
+      // Normal response matching
       const id = msg.id;
 
       if (!id || !this.pendingRequests.has(id)) {
-        console.error(`[ShaderMCP] Received message with unknown id: ${id}`);
+        // Try message handlers for unmatched messages
+        for (const handler of this._messageHandlers) {
+          handler(msg);
+        }
         return;
       }
 

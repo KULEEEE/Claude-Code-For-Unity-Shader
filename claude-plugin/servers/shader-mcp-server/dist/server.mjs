@@ -30855,12 +30855,38 @@ var UnityBridge = class {
     }
     this.pendingRequests.clear();
   }
+  /**
+   * Register a handler for messages sent from Unity to the MCP server.
+   * Used for AI query requests (Unity → MCP → Claude CLI → MCP → Unity).
+   */
+  onMessage(handler) {
+    this._messageHandlers.push(handler);
+  }
+  _messageHandlers = [];
+  /**
+   * Send a raw message back to Unity (used for AI responses).
+   */
+  sendRaw(message) {
+    if (!this.isConnected) {
+      console.error("[ShaderMCP] Cannot send: not connected");
+      return;
+    }
+    this.ws.send(JSON.stringify(message));
+  }
   handleMessage(raw) {
     try {
       const msg = JSON.parse(raw);
+      if (msg.method === "ai/query") {
+        for (const handler of this._messageHandlers) {
+          handler(msg);
+        }
+        return;
+      }
       const id = msg.id;
       if (!id || !this.pendingRequests.has(id)) {
-        console.error(`[ShaderMCP] Received message with unknown id: ${id}`);
+        for (const handler of this._messageHandlers) {
+          handler(msg);
+        }
         return;
       }
       const pending = this.pendingRequests.get(id);
@@ -31148,6 +31174,63 @@ Please install manually: dotnet tool install --global shader-ls`);
     this.openDocuments.clear();
   }
 };
+
+// build/ai-handler.js
+import { spawn as spawn2 } from "child_process";
+async function handleAIQuery(request) {
+  const fullPrompt = buildFullPrompt(request.prompt, request.shaderContext);
+  return new Promise((resolve2) => {
+    try {
+      const proc = spawn2("claude", ["-p", fullPrompt], {
+        timeout: 6e4,
+        // 60 second timeout
+        env: { ...process.env },
+        shell: true
+      });
+      let stdout = "";
+      let stderr = "";
+      proc.stdout.on("data", (data) => {
+        stdout += data.toString();
+      });
+      proc.stderr.on("data", (data) => {
+        stderr += data.toString();
+      });
+      proc.on("close", (code) => {
+        if (code === 0) {
+          resolve2({ success: true, response: stdout.trim() });
+        } else {
+          console.error(`[AI Handler] Claude exited with code ${code}: ${stderr}`);
+          resolve2({
+            success: false,
+            error: `Claude exited with code ${code}. ${stderr.substring(0, 200)}`
+          });
+        }
+      });
+      proc.on("error", (err) => {
+        console.error(`[AI Handler] Failed to spawn claude: ${err.message}`);
+        resolve2({
+          success: false,
+          error: `Failed to run Claude CLI: ${err.message}. Ensure 'claude' is in PATH.`
+        });
+      });
+    } catch (err) {
+      const msg = err instanceof Error ? err.message : String(err);
+      resolve2({ success: false, error: `Exception: ${msg}` });
+    }
+  });
+}
+function buildFullPrompt(userPrompt, shaderContext) {
+  let prompt = "You are a Unity shader expert assistant. Answer clearly and concisely. Use the user's language when possible. When suggesting code changes, provide specific code snippets.\n\n";
+  if (shaderContext) {
+    prompt += `Shader Context:
+${shaderContext}
+
+`;
+  }
+  prompt += `User Question:
+${userPrompt}`;
+  return prompt;
+}
 
 // build/tools/shader-compile.js
 var COMPILE_TIMEOUT = 3e4;
@@ -31694,6 +31777,43 @@ async function main() {
   registerShaderIncludesResource(server, bridge);
   registerShaderKeywordsResource(server, bridge);
   registerEditorPlatformResource(server, bridge);
+  bridge.onMessage(async (msg) => {
+    if (msg.method !== "ai/query")
+      return;
+    const id = msg.id;
+    const params = msg.params;
+    if (!id || !params?.prompt) {
+      console.error("[ShaderMCP] Invalid AI query: missing id or prompt");
+      return;
+    }
+    console.error(`[ShaderMCP] AI query received (id=${id}): ${params.prompt.substring(0, 80)}...`);
+    try {
+      const result = await handleAIQuery({
+        prompt: params.prompt,
+        shaderContext: params.shaderContext
+      });
+      if (result.success) {
+        bridge.sendRaw({
+          method: "ai/response",
+          id,
+          result: result.response
+        });
+      } else {
+        bridge.sendRaw({
+          method: "ai/response",
+          id,
+          error: result.error
+        });
+      }
+    } catch (err) {
+      const errMsg = err instanceof Error ? err.message : String(err);
+      bridge.sendRaw({
+        method: "ai/response",
+        id,
+        error: `AI handler error: ${errMsg}`
+      });
+    }
+  });
   bridge.connect().catch(() => {
     console.error("[ShaderMCP] Initial connection to Unity failed. Will retry automatically.");
   });

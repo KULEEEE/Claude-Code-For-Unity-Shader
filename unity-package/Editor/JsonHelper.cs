@@ -336,6 +336,146 @@ namespace ShaderMCP.Editor
             return defaultValue;
         }
 
+        /// <summary>
+        /// Extract an integer value from JSON by key name.
+        /// </summary>
+        public static int GetInt(string json, string key, int defaultValue = 0)
+        {
+            string searchKey = "\"" + key + "\"";
+            int keyIndex = json.IndexOf(searchKey, StringComparison.Ordinal);
+            if (keyIndex < 0) return defaultValue;
+
+            int colonIndex = json.IndexOf(':', keyIndex + searchKey.Length);
+            if (colonIndex < 0) return defaultValue;
+
+            string rest = json.Substring(colonIndex + 1).TrimStart();
+            var sb = new StringBuilder();
+            foreach (char c in rest)
+            {
+                if (c == '-' || (c >= '0' && c <= '9'))
+                    sb.Append(c);
+                else if (sb.Length > 0)
+                    break;
+            }
+            if (sb.Length > 0 && int.TryParse(sb.ToString(), out int result))
+                return result;
+            return defaultValue;
+        }
+
+        /// <summary>
+        /// Extract a float value from JSON by key name.
+        /// </summary>
+        public static float GetFloat(string json, string key, float defaultValue = 0f)
+        {
+            string searchKey = "\"" + key + "\"";
+            int keyIndex = json.IndexOf(searchKey, StringComparison.Ordinal);
+            if (keyIndex < 0) return defaultValue;
+
+            int colonIndex = json.IndexOf(':', keyIndex + searchKey.Length);
+            if (colonIndex < 0) return defaultValue;
+
+            string rest = json.Substring(colonIndex + 1).TrimStart();
+            var sb = new StringBuilder();
+            foreach (char c in rest)
+            {
+                if (c == '-' || c == '.' || (c >= '0' && c <= '9'))
+                    sb.Append(c);
+                else if (sb.Length > 0)
+                    break;
+            }
+            if (sb.Length > 0 && float.TryParse(sb.ToString(),
+                System.Globalization.NumberStyles.Float,
+                System.Globalization.CultureInfo.InvariantCulture, out float result))
+                return result;
+            return defaultValue;
+        }
+
+        /// <summary>
+        /// Extract a JSON array as a list of raw JSON object strings.
+        /// </summary>
+        public static List<string> GetArrayObjects(string json, string key)
+        {
+            var results = new List<string>();
+            string searchKey = "\"" + key + "\"";
+            int keyIndex = json.IndexOf(searchKey, StringComparison.Ordinal);
+            if (keyIndex < 0) return results;
+
+            int colonIndex = json.IndexOf(':', keyIndex + searchKey.Length);
+            if (colonIndex < 0) return results;
+
+            int arrayStart = json.IndexOf('[', colonIndex + 1);
+            if (arrayStart < 0) return results;
+
+            int depth = 0;
+            bool inString = false;
+            int objStart = -1;
+            for (int i = arrayStart + 1; i < json.Length; i++)
+            {
+                char c = json[i];
+                if (c == '\\' && inString) { i++; continue; }
+                if (c == '"') { inString = !inString; continue; }
+                if (inString) continue;
+
+                if (c == '{')
+                {
+                    if (depth == 0) objStart = i;
+                    depth++;
+                }
+                else if (c == '}')
+                {
+                    depth--;
+                    if (depth == 0 && objStart >= 0)
+                    {
+                        results.Add(json.Substring(objStart, i - objStart + 1));
+                        objStart = -1;
+                    }
+                }
+                else if (c == ']' && depth == 0)
+                {
+                    break;
+                }
+            }
+            return results;
+        }
+
+        /// <summary>
+        /// Extract a JSON array of strings.
+        /// </summary>
+        public static List<string> GetStringArray(string json, string key)
+        {
+            var results = new List<string>();
+            string searchKey = "\"" + key + "\"";
+            int keyIndex = json.IndexOf(searchKey, StringComparison.Ordinal);
+            if (keyIndex < 0) return results;
+
+            int colonIndex = json.IndexOf(':', keyIndex + searchKey.Length);
+            if (colonIndex < 0) return results;
+
+            int arrayStart = json.IndexOf('[', colonIndex + 1);
+            if (arrayStart < 0) return results;
+
+            bool inArray = true;
+            for (int i = arrayStart + 1; i < json.Length && inArray; i++)
+            {
+                char c = json[i];
+                if (c == ']') break;
+                if (c == '"')
+                {
+                    var sb = new StringBuilder();
+                    i++;
+                    for (; i < json.Length; i++)
+                    {
+                        c = json[i];
+                        if (c == '\\' && i + 1 < json.Length) { i++; sb.Append(json[i]); }
+                        else if (c == '"') break;
+                        else sb.Append(c);
+                    }
+                    results.Add(sb.ToString());
+                }
+            }
+            return results;
+        }
+
         private static string EscapeString(string s)
         {
             if (s == null) return "";
