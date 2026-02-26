@@ -1,11 +1,11 @@
 # Unity Shader MCP Tools
 
-**MCP-based shader development tools connecting Unity Editor and Claude Code**
+**MCP-based shader development tools connecting Unity Editor and AI coding assistants**
 
 ```
 ┌─────────────┐     WebSocket      ┌──────────────┐     MCP(stdio)     ┌─────────────┐
-│ Unity Editor│◄─────────────────► │  Node.js     │◄──────────────────►│ Claude Code │
-│ (C# Plugin) │   localhost:8090   │  MCP Server  │                    │             │
+│ Unity Editor│◄─────────────────► │  Node.js     │◄──────────────────►│  AI Coding  │
+│ (C# Plugin) │   localhost:8090   │  MCP Server  │                    │  Assistant  │
 └─────────────┘                    └──────────────┘                    └─────────────┘
                                           ▲
                                           │ stdio
@@ -22,9 +22,11 @@
 - **Unity** 2021.3 LTS or higher (Unity 6.0+ recommended)
 - **Node.js** 18+
 - **AI Coding Assistant** (any one of the following):
-  - [Claude Code](https://claude.ai/claude-code) CLI
-  - [OpenCode](https://opencode.ai/)
-  - [Gemini CLI](https://geminicli.com/)
+  - [Claude Code](https://docs.anthropic.com/en/docs/claude-code)
+  - [OpenCode](https://github.com/opencode-ai/opencode)
+  - [Gemini CLI](https://github.com/google-gemini/gemini-cli)
+  - [Cursor](https://cursor.com)
+  - Any MCP-compatible client
 - **.NET 7.0+ SDK** (optional, for LSP features — [download](https://dotnet.microsoft.com/download))
 
 ---
@@ -41,66 +43,109 @@ https://github.com/KULEEEE/Claude-Code-For-Unity-Shader.git?path=unity-package
 Or install from disk:
 Unity Package Manager > `+` > **Add package from disk** > `unity-package/package.json`
 
-### Step 2: Install MCP Server
+### Step 2: Configure MCP Server
 
-Choose your preferred AI coding assistant:
+The MCP server is published on npm as [`unity-shader-mcp`](https://www.npmjs.com/package/unity-shader-mcp). No build required — just add the config for your AI assistant:
 
-#### Option A: Claude Code
+#### Claude Code
 
-Run these commands in Claude Code (no build needed, bundled file included):
-
-```bash
-/plugin marketplace add KULEEEE/Claude-Code-For-Unity-Shader
-/plugin install unity-shader-tools@unity-shader-mcp
-```
-
-> **Note**: No `npm install` or `npm run build` required. A pre-bundled single file (`dist/server.mjs`) is included.
-
-#### Option B: OpenCode
-
-Add the following to your `opencode.json` (project root or `~/.config/opencode/opencode.json`):
-
-```json
-{
-  "$schema": "https://opencode.ai/config.json",
-  "mcp": {
-  "unity-shader": {
-    "type": "local",
-    "command": ["npx", "-y", "unity-shader-mcp"],
-    "enabled": true
-  }
-  }
-}
-```
-
-> Replace `/path/to/` with the actual path where you cloned this repository.
-
-#### Option C: Gemini CLI
-
-Add the following to your `settings.json` (`~/.gemini/settings.json` or `.gemini/settings.json` in your project):
+Add to `.mcp.json` (project root or `~/.claude/.mcp.json`):
 
 ```json
 {
   "mcpServers": {
     "unity-shader": {
       "command": "npx",
-      "args": ["-y", "unity-shader-mcp", "shader-mcp-server"]
+      "args": ["-y", "unity-shader-mcp"]
     }
   }
 }
 ```
 
-> Replace `/path/to/` with the actual path where you cloned this repository.
+#### OpenCode
+
+Add to `opencode.json` (project root or `~/.config/opencode/opencode.json`):
+
+```json
+{
+  "$schema": "https://opencode.ai/config.json",
+  "mcp": {
+    "unity-shader": {
+      "type": "local",
+      "command": ["npx", "-y", "unity-shader-mcp"],
+      "enabled": true
+    }
+  }
+}
+```
+
+#### Gemini CLI
+
+Add to `settings.json` (`~/.gemini/settings.json` or `.gemini/settings.json`):
+
+```json
+{
+  "mcpServers": {
+    "unity-shader": {
+      "command": "npx",
+      "args": ["-y", "unity-shader-mcp"]
+    }
+  }
+}
+```
+
+#### Cursor
+
+Add to `.cursor/mcp.json` (project root):
+
+```json
+{
+  "mcpServers": {
+    "unity-shader": {
+      "command": "npx",
+      "args": ["-y", "unity-shader-mcp"]
+    }
+  }
+}
+```
+
+> **Auto-update**: Since the server runs via `npx`, you always get the latest version automatically. No manual update needed.
 
 ### Step 3: Verify Connection
 
 1. Open **Tools > Shader MCP > Server Window** in Unity Editor
 2. Click **Start Server**
-3. Test tool calls from Claude Code:
+3. Test tool calls from your AI assistant:
 
 ```
 "Show me the list of shaders in the project"
 ```
+
+---
+
+## Shader Inspector (Unity Editor GUI)
+
+The Unity package includes a built-in **Shader Inspector** window with AI integration.
+
+Open via **Tools > Shader MCP > Shader Inspector**
+
+### Tabs
+
+| Tab | Description |
+|-----|-------------|
+| **Shaders** | Browse shaders with search/sort/filter, view details, run local analysis (compile, variants, properties, code) and AI analysis (error analysis, optimization, explain, diagnose) |
+| **Materials** | Browse materials grouped by shader, view properties/keywords, navigate to shader |
+| **Pipeline** | Read-only dashboard of render pipeline, quality settings, and platform info |
+| **Logs** | Shader-related log viewer with severity filter and AI error analysis |
+| **AI Chat** | Free-form chat with Claude about shaders, auto-attaches selected shader as context |
+
+### Features
+
+- **Drag & drop** shaders/materials into the window
+- **Basic analysis** runs locally in Unity (instant)
+- **AI analysis** routes through MCP server to Claude CLI (requires MCP server connection)
+- **Cross-tab navigation** (e.g., "Go to Shader" from Materials tab)
+- **Quick presets** for common AI queries
 
 ---
 
@@ -216,10 +261,9 @@ The MCP server integrates [shader-language-server](https://github.com/shader-ls/
 - Check if port 8090 is already in use
 - Port can be changed in the Server Window
 
-### Can't connect from Claude Code
+### Can't connect from AI assistant
 - Verify the server is in Running state in Unity Editor
 - Test connection directly with `wscat -c ws://localhost:8090`
-- Ensure the MCP server is built (`npm run build`)
 
 ### Disconnected after Domain Reload
 - The MCP server attempts auto-reconnect every 3 seconds
@@ -242,10 +286,14 @@ The MCP server integrates [shader-language-server](https://github.com/shader-ls/
 - **ShaderCompileWatcher.cs**: Shader-related log filtering
 - **MessageHandler.cs**: JSON message routing
 - **JsonHelper.cs**: Supplements for JsonUtility limitations
+- **ShaderInspectorWindow.cs**: Shader Inspector EditorWindow with tabbed UI
+- **AIRequestHandler.cs**: AI query routing (Unity → MCP → Claude CLI)
+- **Tabs/**: ShaderBrowser, MaterialBrowser, PipelineDashboard, ShaderLogs, AIChat
 
 ### Node.js MCP Server (`claude-plugin/servers/shader-mcp-server/`)
-- **unity-bridge.ts**: Unity WebSocket client (auto-reconnect, UUID matching)
+- **unity-bridge.ts**: Unity WebSocket client (auto-reconnect, UUID matching, AI message relay)
 - **lsp-client.ts**: ShaderLab LSP client (wraps [shader-ls](https://github.com/shader-ls/shader-language-server), auto-install)
+- **ai-handler.ts**: Claude CLI invocation for AI analysis features
 - **tools/**: MCP Tool definitions (7 Unity tools + 4 LSP tools)
 - **resources/**: MCP Resource definitions (4 resources)
 - **index.ts**: McpServer + StdioServerTransport entry point
