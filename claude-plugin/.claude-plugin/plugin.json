@@ -1,6 +1,6 @@
 {
   "name": "unity-shader-tools",
-  "version": "0.1.3",
+  "version": "0.1.4",
   "description": "Unity shader analysis, compilation, and LSP code intelligence tools via MCP",
   "mcpServers": {
     "unity-shader": {
