@@ -2,6 +2,7 @@ import { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import { StdioServerTransport } from "@modelcontextprotocol/sdk/server/stdio.js";
 import { UnityBridge } from "./unity-bridge.js";
 import { ShaderLspClient } from "./lsp-client.js";
+import { handleAIQuery } from "./ai-handler.js";
 
 // Tools
 import { registerShaderCompileTool } from "./tools/shader-compile.js";
@@ -49,6 +50,49 @@ async function main(): Promise<void> {
   registerShaderIncludesResource(server, bridge);
   registerShaderKeywordsResource(server, bridge);
   registerEditorPlatformResource(server, bridge);
+
+  // Register AI query handler (Unity → MCP → Claude CLI → MCP → Unity)
+  bridge.onMessage(async (msg) => {
+    if (msg.method !== "ai/query") return;
+
+    const id = msg.id as string;
+    const params = msg.params as { prompt?: string; shaderContext?: string } | undefined;
+
+    if (!id || !params?.prompt) {
+      console.error("[ShaderMCP] Invalid AI query: missing id or prompt");
+      return;
+    }
+
+    console.error(`[ShaderMCP] AI query received (id=${id}): ${(params.prompt as string).substring(0, 80)}...`);
+
+    try {
+      const result = await handleAIQuery({
+        prompt: params.prompt,
+        shaderContext: params.shaderContext,
+      });
+
+      if (result.success) {
+        bridge.sendRaw({
+          method: "ai/response",
+          id,
+          result: result.response,
+        });
+      } else {
+        bridge.sendRaw({
+          method: "ai/response",
+          id,
+          error: result.error,
+        });
+      }
+    } catch (err: unknown) {
+      const errMsg = err instanceof Error ? err.message : String(err);
+      bridge.sendRaw({
+        method: "ai/response",
+        id,
+        error: `AI handler error: ${errMsg}`,
+      });
+    }
+  });
 
   // Connect to Unity (non-blocking — server starts even if Unity is not running)
   bridge.connect().catch(() => {

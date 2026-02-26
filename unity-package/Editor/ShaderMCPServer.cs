@@ -439,7 +439,21 @@ namespace ShaderMCP.Editor
 
                     AddLog($"← {(message.Length > 200 ? message.Substring(0, 200) + "..." : message)}");
 
-                    // Process and respond
+                    // Check if this is an AI response (from MCP server back to Unity)
+                    string msgMethod = JsonHelper.GetString(message, "method");
+                    if (msgMethod == "ai/response")
+                    {
+                        string aiId = JsonHelper.GetString(message, "id");
+                        string aiResult = JsonHelper.GetString(message, "result");
+                        string aiError = JsonHelper.GetString(message, "error");
+                        if (!string.IsNullOrEmpty(aiError))
+                            AIRequestHandler.HandleError(aiId, aiError);
+                        else
+                            AIRequestHandler.HandleResponse(aiId, aiResult ?? "");
+                        continue;
+                    }
+
+                    // Process normal request and respond
                     string responseJson = _messageHandler.ProcessMessage(message);
                     SendWebSocketMessage(responseJson);
                     AddLog($"→ {(responseJson.Length > 200 ? responseJson.Substring(0, 200) + "..." : responseJson)}");
@@ -726,6 +740,29 @@ namespace ShaderMCP.Editor
 
                 return builder.ToString();
             });
+        }
+
+        #endregion
+
+        #region Public API for AI Integration
+
+        /// <summary>
+        /// Whether a WebSocket client (MCP server) is currently connected.
+        /// </summary>
+        public static bool IsClientConnected =>
+            _connectedClient != null && _connectedClient.Connected;
+
+        /// <summary>
+        /// Send a message to the connected MCP client.
+        /// Used by AIRequestHandler to push AI query requests.
+        /// </summary>
+        public static void SendToClient(string message)
+        {
+            if (!IsClientConnected)
+                throw new InvalidOperationException("No client connected");
+
+            SendWebSocketMessage(message);
+            AddLog($"→ AI: {(message.Length > 200 ? message.Substring(0, 200) + "..." : message)}");
         }
 
         #endregion
