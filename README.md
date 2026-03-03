@@ -23,6 +23,7 @@
 - **Node.js** 18+
 - **AI Coding Assistant** (any one of the following):
   - [Claude Code](https://docs.anthropic.com/en/docs/claude-code)
+  - [Codex CLI](https://github.com/openai/codex)
   - [OpenCode](https://github.com/opencode-ai/opencode)
   - [Gemini CLI](https://github.com/google-gemini/gemini-cli)
   - [Cursor](https://cursor.com)
@@ -105,6 +106,24 @@ Add to `settings.json` (`~/.gemini/settings.json` or `.gemini/settings.json`):
     }
   }
 }
+```
+
+#### Codex CLI
+
+Add to `config.toml` (`~/.codex/config.toml` or `.codex/config.toml` in project root):
+
+**macOS / Linux:**
+```toml
+[mcp_servers.unity-shader]
+command = "npx"
+args = ["-y", "unity-shader-mcp"]
+```
+
+**Windows:**
+```toml
+[mcp_servers.unity-shader]
+command = "cmd"
+args = ["/c", "npx", "-y", "unity-shader-mcp"]
 ```
 
 #### Cursor
