@@ -105,8 +105,7 @@ namespace ShaderMCP.Editor
         private void DrawChatHistory()
         {
             // Cache volatile streaming state to prevent Layout/Repaint mismatch
-            bool showThinking = _isWaitingForResponse &&
-                (_streamingMessage == null || string.IsNullOrEmpty(_streamingMessage.content));
+            bool showThinking = _isWaitingForResponse;
 
             _chatScrollPos = EditorGUILayout.BeginScrollView(_chatScrollPos, GUILayout.ExpandHeight(true));
 
@@ -258,24 +257,41 @@ namespace ShaderMCP.Editor
             string conversationContext = history.Count > 0 ? "\n\nPrevious conversation:\n" + string.Join("\n", history) : "";
             string fullPrompt = userMessage + conversationContext;
 
-            _streamingMessage = new ChatMessage
-            {
-                isUser = false,
-                content = "",
-                timestamp = DateTime.Now.ToString("HH:mm")
-            };
-            _messages.Add(_streamingMessage);
+            _streamingMessage = null;
 
             AIRequestHandler.SendQuery(fullPrompt, shaderContext,
                 onChunk: chunk =>
                 {
+                    if (_streamingMessage == null)
+                    {
+                        _streamingMessage = new ChatMessage
+                        {
+                            isUser = false,
+                            content = "",
+                            timestamp = DateTime.Now.ToString("HH:mm")
+                        };
+                        _messages.Add(_streamingMessage);
+                    }
                     _streamingMessage.content += chunk;
                     _scrollToBottom = true;
                     _window.Repaint();
                 },
                 onComplete: fullText =>
                 {
-                    _streamingMessage.content = fullText ?? "Sorry, I couldn't get a response. Check AI connection.";
+                    string text = fullText ?? "Sorry, I couldn't get a response. Check AI connection.";
+                    if (_streamingMessage != null)
+                    {
+                        _streamingMessage.content = text;
+                    }
+                    else
+                    {
+                        _messages.Add(new ChatMessage
+                        {
+                            isUser = false,
+                            content = text,
+                            timestamp = DateTime.Now.ToString("HH:mm")
+                        });
+                    }
                     _streamingMessage = null;
                     _isWaitingForResponse = false;
                     _scrollToBottom = true;
