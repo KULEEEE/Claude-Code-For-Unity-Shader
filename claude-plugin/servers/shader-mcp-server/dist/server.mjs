@@ -31193,7 +31193,9 @@ async function handleAIQuery(request) {
       let stdout = "";
       let stderr = "";
       proc.stdout.on("data", (data) => {
-        stdout += data.toString();
+        const chunk = data.toString();
+        stdout += chunk;
+        request.onChunk?.(chunk);
       });
       proc.stderr.on("data", (data) => {
         stderr += data.toString();
@@ -31765,7 +31767,7 @@ function registerEditorPlatformResource(server, bridge) {
 async function main() {
   const server = new McpServer({
     name: "unity-shader-tools",
-    version: "0.2.1"
+    version: "0.2.2"
   });
   const bridge = new UnityBridge("ws://localhost:8090");
   const lspClient = new ShaderLspClient();
@@ -31795,7 +31797,10 @@ async function main() {
     try {
       const result = await handleAIQuery({
         prompt: params.prompt,
-        shaderContext: params.shaderContext
+        shaderContext: params.shaderContext,
+        onChunk: (chunk) => {
+          bridge.sendRaw({ method: "ai/chunk", id, chunk });
+        }
       });
       if (result.success) {
         bridge.sendRaw({
