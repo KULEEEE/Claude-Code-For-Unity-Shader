@@ -31182,12 +31182,37 @@ async function handleAIQuery(request) {
   const fullPrompt = buildFullPrompt(request.prompt, request.shaderContext);
   try {
     let resultText = "";
+    request.onStatus?.("\u23F3 Claude Code \uC791\uC5C5 \uC2DC\uC791...");
     for await (const msg of query({
       prompt: fullPrompt,
       options: { cwd: tmpdir() }
     })) {
+      if (msg.type === "system") {
+        request.onStatus?.("\u23F3 Claude Code \uC791\uC5C5 \uC911...");
+      }
+      if (msg.type === "assistant") {
+        const content = msg.message?.content;
+        if (Array.isArray(content)) {
+          for (const block of content) {
+            if (block.type === "text" && block.text) {
+              request.onChunk?.(block.text);
+            }
+            if (block.type === "tool_use") {
+              request.onStatus?.(`\u2699\uFE0F ${block.name}`);
+            }
+          }
+        }
+      }
+      if (msg.type === "tool_progress") {
+        const tp = msg;
+        const elapsed = Math.round(tp.elapsed_time_seconds ?? 0);
+        request.onStatus?.(`\u2699\uFE0F ${tp.tool_name} (${elapsed}s)`);
+      }
       if (msg.type === "stream_event") {
         const event = msg.event;
+        if (event?.type === "content_block_start" && event.content_block?.type === "tool_use") {
+          request.onStatus?.(`\u2699\uFE0F ${event.content_block.name}...`);
+        }
         if (event?.type === "content_block_delta" && event.delta?.type === "text_delta") {
           request.onChunk?.(event.delta.text);
         }
@@ -31776,6 +31801,9 @@ async function main() {
         shaderContext: params.shaderContext,
         onChunk: (chunk) => {
           bridge.sendRaw({ method: "ai/chunk", id, chunk });
+        },
+        onStatus: (status) => {
+          bridge.sendRaw({ method: "ai/status", id, status });
         }
       });
       if (result.success) {
