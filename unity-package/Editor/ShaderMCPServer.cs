@@ -16,6 +16,7 @@ namespace ShaderMCP.Editor
     /// <summary>
     /// WebSocket server (RFC 6455) running on localhost:8090.
     /// Uses TcpListener + manual handshake (Unity Mono lacks HttpListener WebSocket support).
+    /// Supports multiple concurrent WebSocket clients.
     /// Provides an EditorWindow UI for monitoring connections.
     /// </summary>
     [InitializeOnLoad]
@@ -24,10 +25,16 @@ namespace ShaderMCP.Editor
         private const int DefaultPort = 8090;
         private const string WebSocketMagicGuid = "258EAFA5-E914-47DA-95CA-C5AB0DC85B11";
 
+        // Client connection wrapper
+        private class ClientConnection
+        {
+            public TcpClient client;
+            public NetworkStream stream;
+        }
+
         // Server state (static to survive domain reload)
         private static TcpListener _listener;
-        private static TcpClient _connectedClient;
-        private static NetworkStream _networkStream;
+        private static readonly List<ClientConnection> _clients = new List<ClientConnection>();
         private static bool _isRunning;
         private static int _port = DefaultPort;
         private static readonly MessageHandler _messageHandler = new MessageHandler();
@@ -65,7 +72,11 @@ namespace ShaderMCP.Editor
         {
             // Cache volatile state at start of OnGUI to prevent layout mismatches
             bool isRunningNow = _isRunning;
-            bool clientConnected = _connectedClient != null && _connectedClient.Connected;
+            int connectedCount = 0;
+            foreach (var c in _clients)
+            {
+                if (c.client != null && c.client.Connected) connectedCount++;
+            }
             bool mcpRunningCached = _mcpRunning;
 
             EditorGUILayout.Space(5);
@@ -78,8 +89,8 @@ namespace ShaderMCP.Editor
                 EditorStyles.boldLabel, GUILayout.Width(100));
             GUI.color = oldColor;
 
-            GUI.color = clientConnected ? Color.cyan : Color.gray;
-            EditorGUILayout.LabelField(clientConnected ? "Client Connected" : "No Client",
+            GUI.color = connectedCount > 0 ? Color.cyan : Color.gray;
+            EditorGUILayout.LabelField(connectedCount > 0 ? $"Clients: {connectedCount}" : "No Client",
                 GUILayout.Width(120));
             GUI.color = oldColor;
 
@@ -181,6 +192,7 @@ namespace ShaderMCP.Editor
             {
                 RegisterHandlers();
                 _listener = new TcpListener(IPAddress.Loopback, _port);
+                _listener.Server.SetSocketOption(SocketOptionLevel.Socket, SocketOptionName.ReuseAddress, true);
                 _listener.Start();
                 _isRunning = true;
                 AddLog($"Server started on ws://localhost:{_port}");
@@ -204,13 +216,12 @@ namespace ShaderMCP.Editor
 
             try
             {
-                if (_connectedClient != null)
+                foreach (var conn in _clients)
                 {
-                    _networkStream?.Close();
-                    _connectedClient.Close();
-                    _connectedClient = null;
-                    _networkStream = null;
+                    try { conn.stream?.Close(); conn.client?.Close(); }
+                    catch { }
                 }
+                _clients.Clear();
 
                 _listener?.Stop();
                 _listener = null;
@@ -322,19 +333,23 @@ namespace ShaderMCP.Editor
                     HandleNewConnection(newClient);
                 }
 
-                // Read from connected client
-                if (_connectedClient != null && _connectedClient.Connected && _networkStream != null)
+                // Read from all connected clients (iterate in reverse for safe removal)
+                for (int i = _clients.Count - 1; i >= 0; i--)
                 {
-                    if (_connectedClient.Available > 0)
+                    var conn = _clients[i];
+                    if (conn.client == null || !conn.client.Connected)
                     {
-                        ReadWebSocketFrames();
+                        AddLog("Client disconnected");
+                        try { conn.stream?.Close(); conn.client?.Close(); }
+                        catch { }
+                        _clients.RemoveAt(i);
+                        continue;
                     }
-                }
-                else if (_connectedClient != null && !_connectedClient.Connected)
-                {
-                    AddLog("Client disconnected");
-                    _connectedClient = null;
-                    _networkStream = null;
+
+                    if (conn.client.Available > 0)
+                    {
+                        ReadWebSocketFrames(conn);
+                    }
                 }
             }
             catch (Exception ex)
@@ -349,17 +364,6 @@ namespace ShaderMCP.Editor
 
         private static void HandleNewConnection(TcpClient client)
         {
-            // Close existing connection
-            if (_connectedClient != null)
-            {
-                try
-                {
-                    _networkStream?.Close();
-                    _connectedClient.Close();
-                }
-                catch { }
-            }
-
             try
             {
                 var stream = client.GetStream();
@@ -439,9 +443,8 @@ namespace ShaderMCP.Editor
                 stream.Flush();
 
                 client.ReceiveTimeout = 0; // Non-blocking after handshake
-                _connectedClient = client;
-                _networkStream = stream;
-                AddLog("Client connected (WebSocket handshake complete)");
+                _clients.Add(new ClientConnection { client = client, stream = stream });
+                AddLog($"Client connected (WebSocket handshake complete, total: {_clients.Count})");
             }
             catch (Exception ex)
             {
@@ -543,13 +546,13 @@ namespace ShaderMCP.Editor
 
         #region WebSocket Frame Read/Write (RFC 6455)
 
-        private static void ReadWebSocketFrames()
+        private static void ReadWebSocketFrames(ClientConnection conn)
         {
             try
             {
-                while (_connectedClient != null && _connectedClient.Available > 0)
+                while (conn.client != null && conn.client.Available > 0)
                 {
-                    string message = ReadWebSocketMessage();
+                    string message = ReadWebSocketMessage(conn);
                     if (message == null) break;
                     if (message.Length == 0) continue; // Control frame handled
 
@@ -569,34 +572,35 @@ namespace ShaderMCP.Editor
                         continue;
                     }
 
-                    // Process normal request and respond
+                    // Process normal request and respond to the SAME client
                     string responseJson = _messageHandler.ProcessMessage(message);
-                    SendWebSocketMessage(responseJson);
+                    SendWebSocketMessage(conn.stream, responseJson);
                     AddLog($"→ {(responseJson.Length > 200 ? responseJson.Substring(0, 200) + "..." : responseJson)}");
                 }
             }
             catch (Exception ex)
             {
                 AddLog($"Frame read error: {ex.Message}");
-                // Connection may be broken
+                // Connection may be broken — will be cleaned up in Update()
                 try
                 {
-                    _networkStream?.Close();
-                    _connectedClient?.Close();
+                    conn.stream?.Close();
+                    conn.client?.Close();
                 }
                 catch { }
-                _connectedClient = null;
-                _networkStream = null;
+                conn.client = null;
+                conn.stream = null;
             }
         }
 
-        private static string ReadWebSocketMessage()
+        private static string ReadWebSocketMessage(ClientConnection conn)
         {
-            if (_networkStream == null || !_networkStream.CanRead) return null;
+            var stream = conn.stream;
+            if (stream == null || !stream.CanRead) return null;
 
             // Read first 2 bytes
             byte[] header = new byte[2];
-            int read = ReadFully(_networkStream, header, 0, 2);
+            int read = ReadFully(stream, header, 0, 2);
             if (read < 2) return null;
 
             byte opcode = (byte)(header[0] & 0x0F);
@@ -607,13 +611,13 @@ namespace ShaderMCP.Editor
             if (payloadLength == 126)
             {
                 byte[] extLen = new byte[2];
-                ReadFully(_networkStream, extLen, 0, 2);
+                ReadFully(stream, extLen, 0, 2);
                 payloadLength = (extLen[0] << 8) | extLen[1];
             }
             else if (payloadLength == 127)
             {
                 byte[] extLen = new byte[8];
-                ReadFully(_networkStream, extLen, 0, 8);
+                ReadFully(stream, extLen, 0, 8);
                 payloadLength = 0;
                 for (int i = 0; i < 8; i++)
                     payloadLength = (payloadLength << 8) | extLen[i];
@@ -624,14 +628,14 @@ namespace ShaderMCP.Editor
             if (masked)
             {
                 maskKey = new byte[4];
-                ReadFully(_networkStream, maskKey, 0, 4);
+                ReadFully(stream, maskKey, 0, 4);
             }
 
             // Payload
             byte[] payload = new byte[payloadLength];
             if (payloadLength > 0)
             {
-                ReadFully(_networkStream, payload, 0, (int)payloadLength);
+                ReadFully(stream, payload, 0, (int)payloadLength);
             }
 
             // Unmask
@@ -648,14 +652,14 @@ namespace ShaderMCP.Editor
                     return Encoding.UTF8.GetString(payload);
                 case 0x8: // Close
                     AddLog("Client sent close frame");
-                    SendCloseFrame();
-                    _networkStream?.Close();
-                    _connectedClient?.Close();
-                    _connectedClient = null;
-                    _networkStream = null;
+                    SendCloseFrame(stream);
+                    try { stream.Close(); conn.client?.Close(); }
+                    catch { }
+                    conn.client = null;
+                    conn.stream = null;
                     return null;
                 case 0x9: // Ping
-                    SendPongFrame(payload);
+                    SendPongFrame(stream, payload);
                     return ""; // Signal control frame handled
                 case 0xA: // Pong
                     return ""; // Ignore pong
@@ -664,9 +668,9 @@ namespace ShaderMCP.Editor
             }
         }
 
-        private static void SendWebSocketMessage(string message)
+        private static void SendWebSocketMessage(NetworkStream stream, string message)
         {
-            if (_networkStream == null || !_networkStream.CanWrite) return;
+            if (stream == null || !stream.CanWrite) return;
 
             byte[] payload = Encoding.UTF8.GetBytes(message);
             byte[] frame;
@@ -700,22 +704,22 @@ namespace ShaderMCP.Editor
                 Buffer.BlockCopy(payload, 0, frame, 10, payload.Length);
             }
 
-            _networkStream.Write(frame, 0, frame.Length);
-            _networkStream.Flush();
+            stream.Write(frame, 0, frame.Length);
+            stream.Flush();
         }
 
-        private static void SendCloseFrame()
+        private static void SendCloseFrame(NetworkStream stream)
         {
             try
             {
                 byte[] frame = new byte[] { 0x88, 0x00 };
-                _networkStream?.Write(frame, 0, frame.Length);
-                _networkStream?.Flush();
+                stream?.Write(frame, 0, frame.Length);
+                stream?.Flush();
             }
             catch { }
         }
 
-        private static void SendPongFrame(byte[] payload)
+        private static void SendPongFrame(NetworkStream stream, byte[] payload)
         {
             try
             {
@@ -731,8 +735,8 @@ namespace ShaderMCP.Editor
                 {
                     frame = new byte[] { 0x8A, 0x00 };
                 }
-                _networkStream?.Write(frame, 0, frame.Length);
-                _networkStream?.Flush();
+                stream?.Write(frame, 0, frame.Length);
+                stream?.Flush();
             }
             catch { }
         }
@@ -863,22 +867,38 @@ namespace ShaderMCP.Editor
         #region Public API for AI Integration
 
         /// <summary>
-        /// Whether a WebSocket client (MCP server) is currently connected.
+        /// Whether any WebSocket client (MCP server) is currently connected.
         /// </summary>
-        public static bool IsClientConnected =>
-            _connectedClient != null && _connectedClient.Connected;
+        public static bool IsClientConnected
+        {
+            get
+            {
+                foreach (var conn in _clients)
+                {
+                    if (conn.client != null && conn.client.Connected)
+                        return true;
+                }
+                return false;
+            }
+        }
 
         /// <summary>
-        /// Send a message to the connected MCP client.
+        /// Send a message to the first available connected MCP client.
         /// Used by AIRequestHandler to push AI query requests.
         /// </summary>
         public static void SendToClient(string message)
         {
-            if (!IsClientConnected)
-                throw new InvalidOperationException("No client connected");
+            foreach (var conn in _clients)
+            {
+                if (conn.client != null && conn.client.Connected && conn.stream != null)
+                {
+                    SendWebSocketMessage(conn.stream, message);
+                    AddLog($"→ AI: {(message.Length > 200 ? message.Substring(0, 200) + "..." : message)}");
+                    return;
+                }
+            }
 
-            SendWebSocketMessage(message);
-            AddLog($"→ AI: {(message.Length > 200 ? message.Substring(0, 200) + "..." : message)}");
+            throw new InvalidOperationException("No client connected");
         }
 
         #endregion
