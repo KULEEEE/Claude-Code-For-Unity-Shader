@@ -26,7 +26,7 @@ import { registerEditorPlatformResource } from "./resources/editor-platform.js";
 async function main(): Promise<void> {
   const server = new McpServer({
     name: "unity-shader-tools",
-    version: "0.2.1",
+    version: "0.2.2",
   });
 
   const bridge = new UnityBridge("ws://localhost:8090");
@@ -69,6 +69,9 @@ async function main(): Promise<void> {
       const result = await handleAIQuery({
         prompt: params.prompt,
         shaderContext: params.shaderContext,
+        onChunk: (chunk: string) => {
+          bridge.sendRaw({ method: "ai/chunk", id, chunk });
+        },
       });
 
       if (result.success) {

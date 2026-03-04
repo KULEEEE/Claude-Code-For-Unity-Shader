@@ -241,13 +241,14 @@ namespace ShaderMCP.Editor
                     GUILayout.ExpandHeight(true));
             }
 
-            if (_isAIAnalyzing)
+            if (_isAIAnalyzing && string.IsNullOrEmpty(_aiResult))
             {
                 EditorGUILayout.Space(4);
-                EditorGUILayout.LabelField("AI is analyzing... (10~30 seconds)",
+                EditorGUILayout.LabelField("AI is analyzing...",
                     EditorStyles.centeredGreyMiniLabel);
             }
-            else if (!string.IsNullOrEmpty(_aiResult))
+
+            if (!string.IsNullOrEmpty(_aiResult))
             {
                 EditorGUILayout.Space(4);
                 EditorGUILayout.LabelField("AI Analysis Result", ShaderInspectorStyles.SectionHeader);
@@ -289,12 +290,19 @@ namespace ShaderMCP.Editor
             string shaderContext = GatherShaderContext(shader);
             string prompt = BuildAIPrompt(analysisType, shader.name);
 
-            AIRequestHandler.SendQuery(prompt, shaderContext, response =>
-            {
-                _aiResult = response ?? "No response from AI.";
-                _isAIAnalyzing = false;
-                _window.Repaint();
-            });
+            AIRequestHandler.SendQuery(prompt, shaderContext,
+                onChunk: chunk =>
+                {
+                    _aiResult += chunk;
+                    _window.Repaint();
+                },
+                onComplete: fullText =>
+                {
+                    _aiResult = fullText ?? "No response from AI.";
+                    _isAIAnalyzing = false;
+                    _window.Repaint();
+                }
+            );
         }
 
         private string GatherShaderContext(ShaderInfo shader)

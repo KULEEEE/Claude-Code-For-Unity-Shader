@@ -1,5 +1,6 @@
 using System;
 using System.Collections.Generic;
+using System.Text;
 using UnityEngine;
 
 namespace ShaderMCP.Editor
@@ -8,11 +9,19 @@ namespace ShaderMCP.Editor
     /// Manages AI query requests from the Shader Inspector to the MCP server.
     /// Uses the existing WebSocket connection (Unity is server, MCP is client).
     /// Unity sends "ai/query" messages to the connected MCP client, which calls Claude CLI.
+    /// Supports streaming responses via onChunk callback.
     /// </summary>
     public static class AIRequestHandler
     {
-        private static readonly Dictionary<string, Action<string>> _pendingCallbacks =
-            new Dictionary<string, Action<string>>();
+        private class PendingRequest
+        {
+            public Action<string> onChunk;
+            public Action<string> onComplete;
+            public StringBuilder accumulated = new StringBuilder();
+        }
+
+        private static readonly Dictionary<string, PendingRequest> _pendingRequests =
+            new Dictionary<string, PendingRequest>();
         private static readonly object _lock = new object();
 
         /// <summary>
@@ -20,7 +29,7 @@ namespace ShaderMCP.Editor
         /// </summary>
         public static bool HasPendingRequests
         {
-            get { lock (_lock) { return _pendingCallbacks.Count > 0; } }
+            get { lock (_lock) { return _pendingRequests.Count > 0; } }
         }
 
         /// <summary>
@@ -29,17 +38,25 @@ namespace ShaderMCP.Editor
         public static bool IsAvailable => ShaderMCPServer.IsClientConnected;
 
         /// <summary>
-        /// Send an AI query through the WebSocket to the MCP server.
-        /// The MCP server will call Claude CLI and return the response.
+        /// Send an AI query (legacy single-callback overload for backward compatibility).
+        /// </summary>
+        public static void SendQuery(string prompt, string shaderContext, Action<string> onResponse)
+        {
+            SendQuery(prompt, shaderContext, null, onResponse);
+        }
+
+        /// <summary>
+        /// Send an AI query with streaming support.
         /// </summary>
         /// <param name="prompt">The user's question or analysis prompt.</param>
         /// <param name="shaderContext">Optional shader code/info context to include.</param>
-        /// <param name="onResponse">Callback invoked with the AI response text.</param>
-        public static void SendQuery(string prompt, string shaderContext, Action<string> onResponse)
+        /// <param name="onChunk">Called for each streaming chunk (may be null).</param>
+        /// <param name="onComplete">Called with the full response text when complete.</param>
+        public static void SendQuery(string prompt, string shaderContext, Action<string> onChunk, Action<string> onComplete)
         {
             if (!IsAvailable)
             {
-                onResponse?.Invoke("AI is not available. Ensure the MCP server is connected to the Unity WebSocket server.");
+                onComplete?.Invoke("AI is not available. Ensure the MCP server is connected to the Unity WebSocket server.");
                 return;
             }
 
@@ -60,7 +77,11 @@ namespace ShaderMCP.Editor
 
             lock (_lock)
             {
-                _pendingCallbacks[id] = onResponse;
+                _pendingRequests[id] = new PendingRequest
+                {
+                    onChunk = onChunk,
+                    onComplete = onComplete
+                };
             }
 
             try
@@ -70,8 +91,27 @@ namespace ShaderMCP.Editor
             }
             catch (Exception ex)
             {
-                lock (_lock) { _pendingCallbacks.Remove(id); }
-                onResponse?.Invoke($"Failed to send AI query: {ex.Message}");
+                lock (_lock) { _pendingRequests.Remove(id); }
+                onComplete?.Invoke($"Failed to send AI query: {ex.Message}");
+            }
+        }
+
+        /// <summary>
+        /// Handle a streaming chunk received from the MCP server.
+        /// Called by ShaderMCPServer when it receives an "ai/chunk" message.
+        /// </summary>
+        public static void HandleChunk(string id, string chunk)
+        {
+            PendingRequest request = null;
+            lock (_lock)
+            {
+                _pendingRequests.TryGetValue(id, out request);
+            }
+
+            if (request != null)
+            {
+                request.accumulated.Append(chunk);
+                request.onChunk?.Invoke(chunk);
             }
         }
 
@@ -81,16 +121,16 @@ namespace ShaderMCP.Editor
         /// </summary>
         public static void HandleResponse(string id, string responseText)
         {
-            Action<string> callback = null;
+            PendingRequest request = null;
             lock (_lock)
             {
-                if (_pendingCallbacks.TryGetValue(id, out callback))
-                    _pendingCallbacks.Remove(id);
+                if (_pendingRequests.TryGetValue(id, out request))
+                    _pendingRequests.Remove(id);
             }
 
-            if (callback != null)
+            if (request != null)
             {
-                callback.Invoke(responseText);
+                request.onComplete?.Invoke(responseText);
             }
             else
             {
@@ -103,14 +143,14 @@ namespace ShaderMCP.Editor
         /// </summary>
         public static void HandleError(string id, string errorMessage)
         {
-            Action<string> callback = null;
+            PendingRequest request = null;
             lock (_lock)
             {
-                if (_pendingCallbacks.TryGetValue(id, out callback))
-                    _pendingCallbacks.Remove(id);
+                if (_pendingRequests.TryGetValue(id, out request))
+                    _pendingRequests.Remove(id);
             }
 
-            callback?.Invoke($"AI Error: {errorMessage}");
+            request?.onComplete?.Invoke($"AI Error: {errorMessage}");
         }
     }
 }

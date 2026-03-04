@@ -19,6 +19,7 @@ namespace ShaderMCP.Editor
         private Vector2 _chatScrollPos;
         private bool _isWaitingForResponse;
         private bool _scrollToBottom;
+        private ChatMessage _streamingMessage;
 
         // Context
         private string _contextShaderPath;
@@ -136,7 +137,7 @@ namespace ShaderMCP.Editor
                 EditorGUILayout.Space(2);
             }
 
-            if (_isWaitingForResponse)
+            if (_isWaitingForResponse && (_streamingMessage == null || string.IsNullOrEmpty(_streamingMessage.content)))
             {
                 EditorGUILayout.BeginVertical(ShaderInspectorStyles.ChatBubbleAI);
                 var oldColor2 = GUI.color;
@@ -253,18 +254,30 @@ namespace ShaderMCP.Editor
             string conversationContext = history.Count > 0 ? "\n\nPrevious conversation:\n" + string.Join("\n", history) : "";
             string fullPrompt = userMessage + conversationContext;
 
-            AIRequestHandler.SendQuery(fullPrompt, shaderContext, response =>
+            _streamingMessage = new ChatMessage
             {
-                _messages.Add(new ChatMessage
+                isUser = false,
+                content = "",
+                timestamp = DateTime.Now.ToString("HH:mm")
+            };
+            _messages.Add(_streamingMessage);
+
+            AIRequestHandler.SendQuery(fullPrompt, shaderContext,
+                onChunk: chunk =>
                 {
-                    isUser = false,
-                    content = response ?? "Sorry, I couldn't get a response. Check AI connection.",
-                    timestamp = DateTime.Now.ToString("HH:mm")
-                });
-                _isWaitingForResponse = false;
-                _scrollToBottom = true;
-                _window.Repaint();
-            });
+                    _streamingMessage.content += chunk;
+                    _scrollToBottom = true;
+                    _window.Repaint();
+                },
+                onComplete: fullText =>
+                {
+                    _streamingMessage.content = fullText ?? "Sorry, I couldn't get a response. Check AI connection.";
+                    _streamingMessage = null;
+                    _isWaitingForResponse = false;
+                    _scrollToBottom = true;
+                    _window.Repaint();
+                }
+            );
 
             _window.Repaint();
         }
