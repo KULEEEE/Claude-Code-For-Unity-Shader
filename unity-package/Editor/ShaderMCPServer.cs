@@ -62,10 +62,14 @@ namespace ShaderMCP.Editor
             AssemblyReloadEvents.beforeAssemblyReload += OnBeforeAssemblyReload;
 
             // Auto-restart after domain reload if server was previously running
-            if (SessionState.GetBool("ShaderMCP_WasRunning", false))
+            // SessionState cannot be called from static constructors, so defer it.
+            EditorApplication.delayCall += () =>
             {
-                EditorApplication.delayCall += StartServer;
-            }
+                if (SessionState.GetBool("ShaderMCP_WasRunning", false))
+                {
+                    StartServer();
+                }
+            };
         }
 
         private static void OnBeforeAssemblyReload()
