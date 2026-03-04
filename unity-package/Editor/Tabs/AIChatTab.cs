@@ -127,7 +127,10 @@ namespace ShaderMCP.Editor
                 }
                 EditorGUILayout.EndHorizontal();
 
-                EditorGUILayout.LabelField(msg.content, EditorStyles.wordWrappedLabel);
+                if (msg.isUser)
+                    EditorGUILayout.LabelField(msg.content, EditorStyles.wordWrappedLabel);
+                else
+                    MarkdownRenderer.Render(msg.content);
 
                 EditorGUILayout.EndVertical();
                 EditorGUILayout.Space(2);

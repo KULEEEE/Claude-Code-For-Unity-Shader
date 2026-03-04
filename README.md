@@ -1,18 +1,20 @@
 # Unity Shader MCP Tools
 
-**MCP-based shader development tools connecting Unity Editor and AI coding assistants**
+**Unity Editor 내장 AI 셰이더 개발 도구 — MCP 기반으로 AI 코딩 어시스턴트와 연결**
 
 ```
-┌─────────────┐     WebSocket      ┌──────────────┐     MCP(stdio)     ┌─────────────┐
-│ Unity Editor│◄─────────────────► │  Node.js     │◄──────────────────►│  AI Coding  │
-│ (C# Plugin) │   localhost:8090   │  MCP Server  │                    │  Assistant  │
-└─────────────┘                    └──────────────┘                    └─────────────┘
-                                          ▲
-                                          │ stdio
-                                   ┌──────┴───────┐
-                                   │  shader-ls   │
-                                   │  (LSP Server)│
-                                   └──────────────┘
+┌──────────────────────────────────┐
+│        Unity Editor              │
+│  ┌────────────────────────────┐  │     WebSocket      ┌──────────────┐     MCP(stdio)     ┌─────────────┐
+│  │   Shader Inspector Window  │  │◄─────────────────► │  Node.js     │◄──────────────────►│  AI Coding  │
+│  │  (Shaders│Materials│AI Chat)│  │   localhost:8090   │  MCP Server  │                    │  Assistant  │
+│  └────────────────────────────┘  │                    └──────────────┘                    └─────────────┘
+│  ┌────────────────────────────┐  │                           ▲
+│  │   Server Window            │  │                           │ stdio
+│  └────────────────────────────┘  │                    ┌──────┴───────┐
+└──────────────────────────────────┘                    │  shader-ls   │
+                                                        │  (LSP Server)│
+                                                        └──────────────┘
 ```
 
 ---
@@ -169,7 +171,7 @@ Open via **Tools > Shader MCP > Shader Inspector**
 | **Materials** | Browse materials grouped by shader, view properties/keywords, navigate to shader |
 | **Pipeline** | Read-only dashboard of render pipeline, quality settings, and platform info |
 | **Logs** | Shader-related log viewer with severity filter and AI error analysis |
-| **AI Chat** | Free-form chat with Claude about shaders, auto-attaches selected shader as context |
+| **AI Chat** | Free-form chat with Claude about shaders, auto-attaches selected shader as context, **Markdown rendering** for AI responses |
 
 ### Features
 
@@ -178,6 +180,11 @@ Open via **Tools > Shader MCP > Shader Inspector**
 - **AI analysis** routes through MCP server to Claude CLI (requires MCP server connection)
 - **Cross-tab navigation** (e.g., "Go to Shader" from Materials tab)
 - **Quick presets** for common AI queries
+- **AI Chat Markdown Viewer** — AI 응답을 Markdown으로 렌더링:
+  - Headers, **bold**, *italic*, `inline code` highlighting
+  - Code blocks with dark background, Consolas monospace font, and **Copy Code** button
+  - Bullet/numbered lists, blockquotes, horizontal rules
+  - Links, ~~strikethrough~~ display
 
 ---
 
@@ -320,6 +327,7 @@ The MCP server integrates [shader-language-server](https://github.com/shader-ls/
 - **JsonHelper.cs**: Supplements for JsonUtility limitations
 - **ShaderInspectorWindow.cs**: Shader Inspector EditorWindow with tabbed UI
 - **AIRequestHandler.cs**: AI query routing (Unity → MCP → Claude CLI)
+- **MarkdownRenderer.cs**: Markdown → IMGUI rich text renderer for AI Chat responses
 - **Tabs/**: ShaderBrowser, MaterialBrowser, PipelineDashboard, ShaderLogs, AIChat
 
 ### Node.js MCP Server (`claude-plugin/servers/shader-mcp-server/`)
