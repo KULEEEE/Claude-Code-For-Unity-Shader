@@ -632,8 +632,16 @@ namespace ShaderMCP.Editor
 
                     AddLog($"← {(message.Length > 200 ? message.Substring(0, 200) + "..." : message)}");
 
-                    // Check if this is an AI response (from MCP server back to Unity)
+                    // Check if this is an AI message (from MCP server back to Unity)
                     string msgMethod = JsonHelper.GetString(message, "method");
+                    if (msgMethod == "ai/chunk")
+                    {
+                        string aiId = JsonHelper.GetString(message, "id");
+                        string aiChunk = JsonHelper.GetString(message, "chunk");
+                        AIRequestHandler.HandleChunk(aiId, aiChunk);
+                        continue;
+                    }
+
                     if (msgMethod == "ai/response")
                     {
                         string aiId = JsonHelper.GetString(message, "id");

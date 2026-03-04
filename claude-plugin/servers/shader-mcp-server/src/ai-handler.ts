@@ -4,6 +4,7 @@ import { tmpdir } from "os";
 interface AIRequest {
   prompt: string;
   shaderContext?: string;
+  onChunk?: (chunk: string) => void;
 }
 
 interface AIResponse {
@@ -38,7 +39,9 @@ export async function handleAIQuery(request: AIRequest): Promise<AIResponse> {
       let stderr = "";
 
       proc.stdout.on("data", (data: Buffer) => {
-        stdout += data.toString();
+        const chunk = data.toString();
+        stdout += chunk;
+        request.onChunk?.(chunk);
       });
 
       proc.stderr.on("data", (data: Buffer) => {
