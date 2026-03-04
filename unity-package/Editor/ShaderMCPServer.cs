@@ -58,6 +58,41 @@ namespace ShaderMCP.Editor
             EditorApplication.update += Update;
             EditorApplication.quitting -= OnQuitting;
             EditorApplication.quitting += OnQuitting;
+            AssemblyReloadEvents.beforeAssemblyReload -= OnBeforeAssemblyReload;
+            AssemblyReloadEvents.beforeAssemblyReload += OnBeforeAssemblyReload;
+
+            // Auto-restart after domain reload if server was previously running
+            if (SessionState.GetBool("ShaderMCP_WasRunning", false))
+            {
+                EditorApplication.delayCall += StartServer;
+            }
+        }
+
+        private static void OnBeforeAssemblyReload()
+        {
+            // Remember state before domain reload
+            SessionState.SetBool("ShaderMCP_WasRunning", _isRunning);
+
+            // Release all sockets before domain reload to prevent port leaks
+            try
+            {
+                foreach (var conn in _clients)
+                {
+                    try { conn.stream?.Close(); conn.client?.Close(); }
+                    catch { }
+                }
+                _clients.Clear();
+
+                if (_listener != null)
+                {
+                    _listener.Server.Close();
+                    _listener.Stop();
+                    _listener = null;
+                }
+            }
+            catch { }
+
+            _isRunning = false;
         }
 
         [MenuItem("Tools/Shader MCP/Server Window")]
