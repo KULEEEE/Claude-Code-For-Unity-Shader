@@ -72,6 +72,9 @@ async function main(): Promise<void> {
         onChunk: (chunk: string) => {
           bridge.sendRaw({ method: "ai/chunk", id, chunk });
         },
+        onStatus: (status: string) => {
+          bridge.sendRaw({ method: "ai/status", id, status });
+        },
       });
 
       if (result.success) {

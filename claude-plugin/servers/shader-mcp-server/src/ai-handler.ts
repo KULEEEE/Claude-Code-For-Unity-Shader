@@ -5,6 +5,7 @@ interface AIRequest {
   prompt: string;
   shaderContext?: string;
   onChunk?: (chunk: string) => void;
+  onStatus?: (status: string) => void;
 }
 
 interface AIResponse {
@@ -24,20 +25,49 @@ export async function handleAIQuery(request: AIRequest): Promise<AIResponse> {
   try {
     let resultText = "";
 
+    request.onStatus?.("⏳ Claude Code 작업 시작...");
+
     for await (const msg of query({
       prompt: fullPrompt,
       options: { cwd: tmpdir() },
     })) {
-      // Real-time text streaming via content_block_delta
+      if (msg.type === "system") {
+        request.onStatus?.("⏳ Claude Code 작업 중...");
+      }
+
+      // assistant message: extract text chunks + tool use status
+      if (msg.type === "assistant") {
+        const content = (msg as any).message?.content;
+        if (Array.isArray(content)) {
+          for (const block of content) {
+            if (block.type === "text" && block.text) {
+              request.onChunk?.(block.text);
+            }
+            if (block.type === "tool_use") {
+              request.onStatus?.(`⚙️ ${block.name}`);
+            }
+          }
+        }
+      }
+
+      // tool_progress events
+      if (msg.type === "tool_progress") {
+        const tp = msg as any;
+        const elapsed = Math.round(tp.elapsed_time_seconds ?? 0);
+        request.onStatus?.(`⚙️ ${tp.tool_name} (${elapsed}s)`);
+      }
+
+      // stream_event: tool use start
       if (msg.type === "stream_event") {
         const event = (msg as any).event;
-        if (
-          event?.type === "content_block_delta" &&
-          event.delta?.type === "text_delta"
-        ) {
+        if (event?.type === "content_block_start" && event.content_block?.type === "tool_use") {
+          request.onStatus?.(`⚙️ ${event.content_block.name}...`);
+        }
+        if (event?.type === "content_block_delta" && event.delta?.type === "text_delta") {
           request.onChunk?.(event.delta.text);
         }
       }
+
       // Final result
       if (msg.type === "result") {
         resultText = (msg as any).result ?? "";

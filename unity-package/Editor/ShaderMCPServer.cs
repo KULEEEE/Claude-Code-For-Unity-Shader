@@ -638,6 +638,14 @@ namespace ShaderMCP.Editor
 
                     // Check if this is an AI message (from MCP server back to Unity)
                     string msgMethod = JsonHelper.GetString(message, "method");
+                    if (msgMethod == "ai/status")
+                    {
+                        string aiId = JsonHelper.GetString(message, "id");
+                        string aiStatus = JsonHelper.GetString(message, "status");
+                        AIRequestHandler.HandleStatus(aiId, aiStatus);
+                        continue;
+                    }
+
                     if (msgMethod == "ai/chunk")
                     {
                         string aiId = JsonHelper.GetString(message, "id");

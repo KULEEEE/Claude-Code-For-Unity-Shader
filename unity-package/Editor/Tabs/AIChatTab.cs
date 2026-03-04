@@ -20,6 +20,7 @@ namespace ShaderMCP.Editor
         private bool _isWaitingForResponse;
         private bool _scrollToBottom;
         private ChatMessage _streamingMessage;
+        private string _statusText;
 
         // Context
         private string _contextShaderPath;
@@ -142,10 +143,11 @@ namespace ShaderMCP.Editor
 
             if (showThinking)
             {
+                string statusDisplay = !string.IsNullOrEmpty(_statusText) ? _statusText : "AI is thinking...";
                 EditorGUILayout.BeginVertical(ShaderInspectorStyles.ChatBubbleAI);
                 var oldColor2 = GUI.color;
                 GUI.color = ShaderInspectorStyles.AIColor;
-                EditorGUILayout.LabelField("AI is thinking...", EditorStyles.miniLabel);
+                EditorGUILayout.LabelField(statusDisplay, EditorStyles.miniLabel);
                 GUI.color = oldColor2;
                 EditorGUILayout.EndVertical();
             }
@@ -258,6 +260,7 @@ namespace ShaderMCP.Editor
             string fullPrompt = userMessage + conversationContext;
 
             _streamingMessage = null;
+            _statusText = null;
 
             AIRequestHandler.SendQuery(fullPrompt, shaderContext,
                 onChunk: chunk =>
@@ -293,7 +296,14 @@ namespace ShaderMCP.Editor
                         });
                     }
                     _streamingMessage = null;
+                    _statusText = null;
                     _isWaitingForResponse = false;
+                    _scrollToBottom = true;
+                    _window.Repaint();
+                },
+                onStatus: status =>
+                {
+                    _statusText = status;
                     _scrollToBottom = true;
                     _window.Repaint();
                 }

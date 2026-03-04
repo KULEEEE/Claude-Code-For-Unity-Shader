@@ -17,6 +17,7 @@ namespace ShaderMCP.Editor
         {
             public Action<string> onChunk;
             public Action<string> onComplete;
+            public Action<string> onStatus;
             public StringBuilder accumulated = new StringBuilder();
         }
 
@@ -52,7 +53,8 @@ namespace ShaderMCP.Editor
         /// <param name="shaderContext">Optional shader code/info context to include.</param>
         /// <param name="onChunk">Called for each streaming chunk (may be null).</param>
         /// <param name="onComplete">Called with the full response text when complete.</param>
-        public static void SendQuery(string prompt, string shaderContext, Action<string> onChunk, Action<string> onComplete)
+        /// <param name="onStatus">Called with progress status updates (may be null).</param>
+        public static void SendQuery(string prompt, string shaderContext, Action<string> onChunk, Action<string> onComplete, Action<string> onStatus = null)
         {
             if (!IsAvailable)
             {
@@ -80,7 +82,8 @@ namespace ShaderMCP.Editor
                 _pendingRequests[id] = new PendingRequest
                 {
                     onChunk = onChunk,
-                    onComplete = onComplete
+                    onComplete = onComplete,
+                    onStatus = onStatus
                 };
             }
 
@@ -93,6 +96,24 @@ namespace ShaderMCP.Editor
             {
                 lock (_lock) { _pendingRequests.Remove(id); }
                 onComplete?.Invoke($"Failed to send AI query: {ex.Message}");
+            }
+        }
+
+        /// <summary>
+        /// Handle a status update received from the MCP server.
+        /// Called by ShaderMCPServer when it receives an "ai/status" message.
+        /// </summary>
+        public static void HandleStatus(string id, string status)
+        {
+            PendingRequest request = null;
+            lock (_lock)
+            {
+                _pendingRequests.TryGetValue(id, out request);
+            }
+
+            if (request != null)
+            {
+                request.onStatus?.Invoke(status);
             }
         }
 
