@@ -197,16 +197,16 @@ namespace ShaderMCP.Editor
             }
             EditorGUILayout.EndHorizontal();
 
-            // Log view
+            // Log view — snapshot to prevent Layout/Repaint mismatch
+            string[] logSnapshot;
+            lock (_logLock) { logSnapshot = _logEntries.ToArray(); }
+
             _logScrollPos = EditorGUILayout.BeginScrollView(_logScrollPos,
                 GUILayout.ExpandHeight(true));
 
-            lock (_logLock)
+            foreach (var entry in logSnapshot)
             {
-                foreach (var entry in _logEntries)
-                {
-                    EditorGUILayout.LabelField(entry, EditorStyles.wordWrappedMiniLabel);
-                }
+                EditorGUILayout.LabelField(entry, EditorStyles.wordWrappedMiniLabel);
             }
 
             EditorGUILayout.EndScrollView();
