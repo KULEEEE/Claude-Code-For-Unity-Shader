@@ -64,11 +64,24 @@ namespace ShaderMCP.Editor
                 Repaint();
         }
 
+        private double _lastAICheckTime;
+
         private void Update()
         {
             // Check for pending AI responses
             if (AIRequestHandler.HasPendingRequests)
                 Repaint();
+
+            // Periodically check AI connection status (every 2 seconds)
+            double now = EditorApplication.timeSinceStartup;
+            if (now - _lastAICheckTime > 2.0)
+            {
+                _lastAICheckTime = now;
+                bool wasConnected = _aiConnected;
+                CheckAIConnection();
+                if (wasConnected != _aiConnected)
+                    Repaint();
+            }
         }
 
         #region Toolbar

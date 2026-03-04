@@ -1,5 +1,6 @@
 using System;
 using System.Collections.Generic;
+using System.Diagnostics;
 using System.IO;
 using System.Net;
 using System.Net.Sockets;
@@ -8,6 +9,7 @@ using System.Text;
 using System.Threading;
 using UnityEditor;
 using UnityEngine;
+using Debug = UnityEngine.Debug;
 
 namespace ShaderMCP.Editor
 {
@@ -32,6 +34,11 @@ namespace ShaderMCP.Editor
         private static readonly List<string> _logEntries = new List<string>();
         private static readonly object _logLock = new object();
         private static bool _handlersRegistered;
+
+        // MCP Server process
+        private static Process _mcpProcess;
+        private static bool _mcpRunning;
+        private static bool _autoStartMCP = true;
 
         // EditorWindow state
         private Vector2 _logScrollPos;
@@ -73,6 +80,15 @@ namespace ShaderMCP.Editor
                 EditorGUILayout.LabelField("Client Connected", GUILayout.Width(120));
                 GUI.color = oldColor;
             }
+
+            // MCP process status
+            if (_mcpRunning)
+            {
+                GUI.color = Color.green;
+                EditorGUILayout.LabelField("MCP: Running", GUILayout.Width(100));
+                GUI.color = oldColor;
+            }
+
             GUILayout.FlexibleSpace();
             EditorGUILayout.EndHorizontal();
 
@@ -95,6 +111,16 @@ namespace ShaderMCP.Editor
                 if (GUILayout.Button("Stop Server", GUILayout.Width(120)))
                     StopServer();
             }
+            EditorGUILayout.EndHorizontal();
+
+            // Auto-start MCP toggle
+            EditorGUILayout.BeginHorizontal();
+            _autoStartMCP = EditorGUILayout.ToggleLeft(
+                "Auto-start MCP Server (npx unity-shader-mcp)", _autoStartMCP, GUILayout.Width(350));
+            if (_mcpRunning && GUILayout.Button("Stop MCP", GUILayout.Width(80)))
+                StopMCPServer();
+            if (!_mcpRunning && _isRunning && GUILayout.Button("Start MCP", GUILayout.Width(80)))
+                StartMCPServer();
             EditorGUILayout.EndHorizontal();
 
             EditorGUILayout.Space(5);
@@ -152,6 +178,10 @@ namespace ShaderMCP.Editor
                 _listener.Start();
                 _isRunning = true;
                 AddLog($"Server started on ws://localhost:{_port}");
+
+                // Auto-start MCP server process
+                if (_autoStartMCP)
+                    StartMCPServer();
             }
             catch (Exception ex)
             {
@@ -163,6 +193,8 @@ namespace ShaderMCP.Editor
         public static void StopServer()
         {
             _isRunning = false;
+
+            StopMCPServer();
 
             try
             {
@@ -181,6 +213,84 @@ namespace ShaderMCP.Editor
             catch (Exception ex)
             {
                 AddLog($"Error stopping server: {ex.Message}");
+            }
+        }
+
+        public static void StartMCPServer()
+        {
+            if (_mcpRunning) return;
+
+            try
+            {
+                var startInfo = new ProcessStartInfo();
+
+                #if UNITY_EDITOR_WIN
+                startInfo.FileName = "cmd";
+                startInfo.Arguments = "/c npx -y unity-shader-mcp";
+                #else
+                startInfo.FileName = "npx";
+                startInfo.Arguments = "-y unity-shader-mcp";
+                #endif
+
+                startInfo.UseShellExecute = false;
+                startInfo.RedirectStandardOutput = true;
+                startInfo.RedirectStandardError = true;
+                startInfo.RedirectStandardInput = true;
+                startInfo.CreateNoWindow = true;
+
+                _mcpProcess = new Process();
+                _mcpProcess.StartInfo = startInfo;
+                _mcpProcess.EnableRaisingEvents = true;
+                _mcpProcess.Exited += (sender, args) =>
+                {
+                    _mcpRunning = false;
+                    AddLog("MCP server process exited");
+                };
+
+                // Capture stderr for logging (MCP uses stdout for protocol, stderr for logs)
+                _mcpProcess.ErrorDataReceived += (sender, args) =>
+                {
+                    if (!string.IsNullOrEmpty(args.Data))
+                        AddLog($"[MCP] {args.Data}");
+                };
+
+                _mcpProcess.Start();
+                _mcpProcess.BeginErrorReadLine();
+                _mcpRunning = true;
+
+                AddLog("MCP server process started (npx unity-shader-mcp)");
+            }
+            catch (Exception ex)
+            {
+                AddLog($"Failed to start MCP server: {ex.Message}");
+                Debug.LogWarning($"[ShaderMCP] Failed to start MCP server: {ex.Message}. " +
+                    "Ensure Node.js 18+ is installed and npx is in PATH.");
+                _mcpRunning = false;
+            }
+        }
+
+        public static void StopMCPServer()
+        {
+            if (!_mcpRunning || _mcpProcess == null) return;
+
+            try
+            {
+                if (!_mcpProcess.HasExited)
+                {
+                    _mcpProcess.Kill();
+                    _mcpProcess.WaitForExit(3000);
+                }
+                _mcpProcess.Dispose();
+            }
+            catch (Exception ex)
+            {
+                AddLog($"Error stopping MCP server: {ex.Message}");
+            }
+            finally
+            {
+                _mcpProcess = null;
+                _mcpRunning = false;
+                AddLog("MCP server process stopped");
             }
         }
 
