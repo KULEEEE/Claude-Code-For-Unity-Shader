@@ -193,6 +193,7 @@ namespace ShaderMCP.Editor
                 RegisterHandlers();
                 _listener = new TcpListener(IPAddress.Loopback, _port);
                 _listener.ExclusiveAddressUse = false;
+                _listener.Server.SetSocketOption(SocketOptionLevel.Socket, SocketOptionName.ReuseAddress, true);
                 _listener.Start();
                 _isRunning = true;
                 AddLog($"Server started on ws://localhost:{_port}");
