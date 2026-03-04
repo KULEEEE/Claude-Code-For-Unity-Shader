@@ -27,7 +27,8 @@ export async function handleAIQuery(request: AIRequest): Promise<AIResponse> {
       // and special character escaping issues.
       // cwd set to temp dir to prevent claude from loading project .mcp.json,
       // which would spawn a competing MCP server and break the WebSocket connection.
-      const proc = spawn("claude", ["-p"], {
+      // --output-format stream-json enables token-by-token streaming via stdout.
+      const proc = spawn("claude", ["-p", "--output-format", "stream-json"], {
         timeout: 120000, // 120 second timeout
         env: { ...process.env },
         shell: true,
@@ -35,13 +36,31 @@ export async function handleAIQuery(request: AIRequest): Promise<AIResponse> {
         cwd: tmpdir(),
       });
 
-      let stdout = "";
+      let fullResult = "";
       let stderr = "";
+      let lineBuffer = "";
 
       proc.stdout.on("data", (data: Buffer) => {
-        const chunk = data.toString();
-        stdout += chunk;
-        request.onChunk?.(chunk);
+        lineBuffer += data.toString();
+        const lines = lineBuffer.split("\n");
+        lineBuffer = lines.pop() || ""; // keep incomplete last line
+
+        for (const line of lines) {
+          if (!line.trim()) continue;
+          try {
+            const event = JSON.parse(line);
+            if (
+              event.type === "content_block_delta" &&
+              event.delta?.type === "text_delta"
+            ) {
+              request.onChunk?.(event.delta.text);
+            } else if (event.type === "result") {
+              fullResult = event.result || "";
+            }
+          } catch {
+            // partial or non-JSON line, skip
+          }
+        }
       });
 
       proc.stderr.on("data", (data: Buffer) => {
@@ -49,8 +68,18 @@ export async function handleAIQuery(request: AIRequest): Promise<AIResponse> {
       });
 
       proc.on("close", (code: number | null) => {
+        // Process any remaining buffered line
+        if (lineBuffer.trim()) {
+          try {
+            const event = JSON.parse(lineBuffer);
+            if (event.type === "result") {
+              fullResult = event.result || "";
+            }
+          } catch {}
+        }
+
         if (code === 0) {
-          resolve({ success: true, response: stdout.trim() });
+          resolve({ success: true, response: fullResult });
         } else {
           console.error(
             `[AI Handler] Claude exited with code ${code}: ${stderr}`
