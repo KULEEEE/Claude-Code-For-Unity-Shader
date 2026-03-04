@@ -7,6 +7,7 @@ await build({
   target: "node18",
   format: "esm",
   outfile: "dist/server.mjs",
+  external: ["@anthropic-ai/claude-agent-sdk"],
   banner: {
     js: [
       "#!/usr/bin/env node",

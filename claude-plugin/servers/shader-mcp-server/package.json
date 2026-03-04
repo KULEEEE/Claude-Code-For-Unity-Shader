@@ -1,6 +1,6 @@
 {
   "name": "unity-shader-mcp",
-  "version": "0.2.6",
+  "version": "0.2.7",
   "description": "MCP server for Unity shader analysis tools - connects Unity Editor to AI coding assistants via Model Context Protocol",
   "type": "module",
   "main": "dist/server.mjs",
@@ -42,6 +42,7 @@
     "node": ">=18"
   },
   "dependencies": {
+    "@anthropic-ai/claude-agent-sdk": "^0.1.1",
     "@modelcontextprotocol/sdk": "^1.0.0",
     "vscode-languageserver-protocol": "^3.17.5",
     "ws": "^8.16.0",

@@ -1,4 +1,4 @@
-import { spawn } from "child_process";
+import { query } from "@anthropic-ai/claude-agent-sdk";
 import { tmpdir } from "os";
 
 interface AIRequest {
@@ -14,70 +14,41 @@ interface AIResponse {
 }
 
 /**
- * Handle an AI query by calling the Claude CLI (`claude -p`).
+ * Handle an AI query using the Claude Agent SDK.
  * Uses the existing Claude Code authentication — no API key needed.
- * Prompt is passed via stdin to avoid command-line length limits on Windows.
+ * Streams tokens in real-time via onChunk callback.
  */
 export async function handleAIQuery(request: AIRequest): Promise<AIResponse> {
   const fullPrompt = buildFullPrompt(request.prompt, request.shaderContext);
 
-  return new Promise((resolve) => {
-    try {
-      // Use stdin pipe to pass prompt — avoids Windows cmd length limits
-      // and special character escaping issues.
-      // cwd set to temp dir to prevent claude from loading project .mcp.json,
-      // which would spawn a competing MCP server and break the WebSocket connection.
-      const proc = spawn("claude", ["-p"], {
-        timeout: 120000, // 120 second timeout
-        env: { ...process.env },
-        shell: true,
-        stdio: ["pipe", "pipe", "pipe"],
-        cwd: tmpdir(),
-      });
+  try {
+    let resultText = "";
 
-      let stdout = "";
-      let stderr = "";
-
-      proc.stdout.on("data", (data: Buffer) => {
-        const chunk = data.toString();
-        stdout += chunk;
-        request.onChunk?.(chunk);
-      });
-
-      proc.stderr.on("data", (data: Buffer) => {
-        stderr += data.toString();
-      });
-
-      proc.on("close", (code: number | null) => {
-        if (code === 0) {
-          resolve({ success: true, response: stdout.trim() });
-        } else {
-          console.error(
-            `[AI Handler] Claude exited with code ${code}: ${stderr}`
-          );
-          resolve({
-            success: false,
-            error: `Claude exited with code ${code}. ${stderr.substring(0, 200)}`,
-          });
+    for await (const msg of query({
+      prompt: fullPrompt,
+      options: { cwd: tmpdir() },
+    })) {
+      // Real-time text streaming via content_block_delta
+      if (msg.type === "stream_event") {
+        const event = (msg as any).event;
+        if (
+          event?.type === "content_block_delta" &&
+          event.delta?.type === "text_delta"
+        ) {
+          request.onChunk?.(event.delta.text);
         }
-      });
-
-      proc.on("error", (err: Error) => {
-        console.error(`[AI Handler] Failed to spawn claude: ${err.message}`);
-        resolve({
-          success: false,
-          error: `Failed to run Claude CLI: ${err.message}. Ensure 'claude' is in PATH.`,
-        });
-      });
-
-      // Write prompt to stdin and close
-      proc.stdin.write(fullPrompt);
-      proc.stdin.end();
-    } catch (err: unknown) {
-      const msg = err instanceof Error ? err.message : String(err);
-      resolve({ success: false, error: `Exception: ${msg}` });
+      }
+      // Final result
+      if (msg.type === "result") {
+        resultText = (msg as any).result ?? "";
+      }
     }
-  });
+
+    return { success: true, response: resultText };
+  } catch (err) {
+    const msg = err instanceof Error ? err.message : String(err);
+    return { success: false, error: msg };
+  }
 }
 
 function buildFullPrompt(
