@@ -192,8 +192,6 @@ namespace ShaderMCP.Editor
             {
                 RegisterHandlers();
                 _listener = new TcpListener(IPAddress.Loopback, _port);
-                _listener.ExclusiveAddressUse = false;
-                _listener.Server.SetSocketOption(SocketOptionLevel.Socket, SocketOptionName.ReuseAddress, true);
                 _listener.Start();
                 _isRunning = true;
                 AddLog($"Server started on ws://localhost:{_port}");
@@ -219,13 +217,25 @@ namespace ShaderMCP.Editor
             {
                 foreach (var conn in _clients)
                 {
-                    try { conn.stream?.Close(); conn.client?.Close(); }
+                    try
+                    {
+                        conn.client.Client.LingerState = new System.Net.Sockets.LingerOption(true, 0);
+                        conn.stream?.Close();
+                        conn.client?.Close();
+                    }
                     catch { }
                 }
                 _clients.Clear();
 
-                _listener?.Stop();
-                _listener = null;
+                if (_listener != null)
+                {
+                    try { _listener.Server.LingerState = new System.Net.Sockets.LingerOption(true, 0); }
+                    catch { }
+                    try { _listener.Server.Close(); }
+                    catch { }
+                    _listener.Stop();
+                    _listener = null;
+                }
                 AddLog("Server stopped");
             }
             catch (Exception ex)
