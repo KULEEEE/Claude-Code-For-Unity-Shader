@@ -31177,6 +31177,7 @@ Please install manually: dotnet tool install --global shader-ls`);
 
 // build/ai-handler.js
 import { spawn as spawn2 } from "child_process";
+import { tmpdir } from "os";
 async function handleAIQuery(request) {
   const fullPrompt = buildFullPrompt(request.prompt, request.shaderContext);
   return new Promise((resolve2) => {
@@ -31186,7 +31187,8 @@ async function handleAIQuery(request) {
         // 120 second timeout
         env: { ...process.env },
         shell: true,
-        stdio: ["pipe", "pipe", "pipe"]
+        stdio: ["pipe", "pipe", "pipe"],
+        cwd: tmpdir()
       });
       let stdout = "";
       let stderr = "";
@@ -31763,7 +31765,7 @@ function registerEditorPlatformResource(server, bridge) {
 async function main() {
   const server = new McpServer({
     name: "unity-shader-tools",
-    version: "0.1.5"
+    version: "0.2.0"
   });
   const bridge = new UnityBridge("ws://localhost:8090");
   const lspClient = new ShaderLspClient();

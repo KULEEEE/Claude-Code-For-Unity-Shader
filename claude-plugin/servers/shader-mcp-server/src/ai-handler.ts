@@ -1,4 +1,5 @@
 import { spawn } from "child_process";
+import { tmpdir } from "os";
 
 interface AIRequest {
   prompt: string;
@@ -22,12 +23,15 @@ export async function handleAIQuery(request: AIRequest): Promise<AIResponse> {
   return new Promise((resolve) => {
     try {
       // Use stdin pipe to pass prompt — avoids Windows cmd length limits
-      // and special character escaping issues
+      // and special character escaping issues.
+      // cwd set to temp dir to prevent claude from loading project .mcp.json,
+      // which would spawn a competing MCP server and break the WebSocket connection.
       const proc = spawn("claude", ["-p"], {
         timeout: 120000, // 120 second timeout
         env: { ...process.env },
         shell: true,
         stdio: ["pipe", "pipe", "pipe"],
+        cwd: tmpdir(),
       });
 
       let stdout = "";
