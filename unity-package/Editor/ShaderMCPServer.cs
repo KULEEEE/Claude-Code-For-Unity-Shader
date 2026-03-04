@@ -72,6 +72,11 @@ namespace ShaderMCP.Editor
         {
             // Remember state before domain reload
             SessionState.SetBool("ShaderMCP_WasRunning", _isRunning);
+            // Remember MCP state too
+            SessionState.SetBool("ShaderMCP_MCPWasRunning", _mcpRunning);
+
+            // Kill MCP process tree before domain reload
+            StopMCPServer();
 
             // Release all sockets before domain reload to prevent port leaks
             try
@@ -340,7 +345,30 @@ namespace ShaderMCP.Editor
             {
                 if (!_mcpProcess.HasExited)
                 {
+                    // On Windows, cmd /c npx spawns child node.exe processes.
+                    // Process.Kill() only kills cmd.exe, leaving node.exe orphaned.
+                    // Use taskkill /T /F to kill the entire process tree.
+                    #if UNITY_EDITOR_WIN
+                    try
+                    {
+                        var killProc = Process.Start(new ProcessStartInfo
+                        {
+                            FileName = "taskkill",
+                            Arguments = $"/PID {_mcpProcess.Id} /T /F",
+                            UseShellExecute = false,
+                            CreateNoWindow = true,
+                            RedirectStandardOutput = true,
+                            RedirectStandardError = true
+                        });
+                        killProc?.WaitForExit(5000);
+                    }
+                    catch
+                    {
+                        _mcpProcess.Kill();
+                    }
+                    #else
                     _mcpProcess.Kill();
+                    #endif
                     _mcpProcess.WaitForExit(3000);
                 }
                 _mcpProcess.Dispose();
