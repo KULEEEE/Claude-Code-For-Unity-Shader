@@ -3429,9 +3429,9 @@ var require_schemes = __commonJS({
         wsComponent.secure = void 0;
       }
       if (wsComponent.resourceName) {
-        const [path, query] = wsComponent.resourceName.split("?");
+        const [path, query2] = wsComponent.resourceName.split("?");
         wsComponent.path = path && path !== "/" ? path : void 0;
-        wsComponent.query = query;
+        wsComponent.query = query2;
         wsComponent.resourceName = void 0;
       }
       wsComponent.fragment = void 0;
@@ -31176,78 +31176,31 @@ Please install manually: dotnet tool install --global shader-ls`);
 };
 
 // build/ai-handler.js
-import { spawn as spawn2 } from "child_process";
+import { query } from "@anthropic-ai/claude-agent-sdk";
 import { tmpdir } from "os";
 async function handleAIQuery(request) {
   const fullPrompt = buildFullPrompt(request.prompt, request.shaderContext);
-  return new Promise((resolve2) => {
-    try {
-      const proc = spawn2("claude", ["-p", "--output-format", "stream-json", "--verbose"], {
-        timeout: 12e4,
-        // 120 second timeout
-        env: { ...process.env },
-        shell: true,
-        stdio: ["pipe", "pipe", "pipe"],
-        cwd: tmpdir()
-      });
-      let fullResult = "";
-      let stderr = "";
-      let lineBuffer = "";
-      proc.stdout.on("data", (data) => {
-        lineBuffer += data.toString();
-        const lines = lineBuffer.split("\n");
-        lineBuffer = lines.pop() || "";
-        for (const line of lines) {
-          if (!line.trim())
-            continue;
-          try {
-            const event = JSON.parse(line);
-            if (event.type === "content_block_delta" && event.delta?.type === "text_delta") {
-              request.onChunk?.(event.delta.text);
-            } else if (event.type === "result") {
-              fullResult = event.result || "";
-            }
-          } catch {
-          }
+  try {
+    let resultText = "";
+    for await (const msg of query({
+      prompt: fullPrompt,
+      options: { cwd: tmpdir() }
+    })) {
+      if (msg.type === "stream_event") {
+        const event = msg.event;
+        if (event?.type === "content_block_delta" && event.delta?.type === "text_delta") {
+          request.onChunk?.(event.delta.text);
         }
-      });
-      proc.stderr.on("data", (data) => {
-        stderr += data.toString();
-      });
-      proc.on("close", (code) => {
-        if (lineBuffer.trim()) {
-          try {
-            const event = JSON.parse(lineBuffer);
-            if (event.type === "result") {
-              fullResult = event.result || "";
-            }
-          } catch {
-          }
-        }
-        if (code === 0) {
-          resolve2({ success: true, response: fullResult });
-        } else {
-          console.error(`[AI Handler] Claude exited with code ${code}: ${stderr}`);
-          resolve2({
-            success: false,
-            error: `Claude exited with code ${code}. ${stderr.substring(0, 200)}`
-          });
-        }
-      });
-      proc.on("error", (err) => {
-        console.error(`[AI Handler] Failed to spawn claude: ${err.message}`);
-        resolve2({
-          success: false,
-          error: `Failed to run Claude CLI: ${err.message}. Ensure 'claude' is in PATH.`
-        });
-      });
-      proc.stdin.write(fullPrompt);
-      proc.stdin.end();
-    } catch (err) {
-      const msg = err instanceof Error ? err.message : String(err);
-      resolve2({ success: false, error: `Exception: ${msg}` });
+      }
+      if (msg.type === "result") {
+        resultText = msg.result ?? "";
+      }
     }
-  });
+    return { success: true, response: resultText };
+  } catch (err) {
+    const msg = err instanceof Error ? err.message : String(err);
+    return { success: false, error: msg };
+  }
 }
 function buildFullPrompt(userPrompt, shaderContext) {
   let prompt = "You are a Unity shader expert assistant. Answer clearly and concisely. Use the user's language when possible. When suggesting code changes, provide specific code snippets.\n\n";
@@ -31790,7 +31743,7 @@ function registerEditorPlatformResource(server, bridge) {
 async function main() {
   const server = new McpServer({
     name: "unity-shader-tools",
-    version: "0.2.4"
+    version: "0.2.6"
   });
   const bridge = new UnityBridge("ws://localhost:8090");
   const lspClient = new ShaderLspClient();
