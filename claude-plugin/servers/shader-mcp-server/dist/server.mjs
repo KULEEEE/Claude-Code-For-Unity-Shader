@@ -31182,7 +31182,7 @@ async function handleAIQuery(request) {
   const fullPrompt = buildFullPrompt(request.prompt, request.shaderContext);
   return new Promise((resolve2) => {
     try {
-      const proc = spawn2("claude", ["-p"], {
+      const proc = spawn2("claude", ["-p", "--output-format", "stream-json"], {
         timeout: 12e4,
         // 120 second timeout
         env: { ...process.env },
@@ -31190,19 +31190,42 @@ async function handleAIQuery(request) {
         stdio: ["pipe", "pipe", "pipe"],
         cwd: tmpdir()
       });
-      let stdout = "";
+      let fullResult = "";
       let stderr = "";
+      let lineBuffer = "";
       proc.stdout.on("data", (data) => {
-        const chunk = data.toString();
-        stdout += chunk;
-        request.onChunk?.(chunk);
+        lineBuffer += data.toString();
+        const lines = lineBuffer.split("\n");
+        lineBuffer = lines.pop() || "";
+        for (const line of lines) {
+          if (!line.trim())
+            continue;
+          try {
+            const event = JSON.parse(line);
+            if (event.type === "content_block_delta" && event.delta?.type === "text_delta") {
+              request.onChunk?.(event.delta.text);
+            } else if (event.type === "result") {
+              fullResult = event.result || "";
+            }
+          } catch {
+          }
+        }
       });
       proc.stderr.on("data", (data) => {
         stderr += data.toString();
       });
       proc.on("close", (code) => {
+        if (lineBuffer.trim()) {
+          try {
+            const event = JSON.parse(lineBuffer);
+            if (event.type === "result") {
+              fullResult = event.result || "";
+            }
+          } catch {
+          }
+        }
         if (code === 0) {
-          resolve2({ success: true, response: stdout.trim() });
+          resolve2({ success: true, response: fullResult });
         } else {
           console.error(`[AI Handler] Claude exited with code ${code}: ${stderr}`);
           resolve2({
@@ -31767,7 +31790,7 @@ function registerEditorPlatformResource(server, bridge) {
 async function main() {
   const server = new McpServer({
     name: "unity-shader-tools",
-    version: "0.2.2"
+    version: "0.2.3"
   });
   const bridge = new UnityBridge("ws://localhost:8090");
   const lspClient = new ShaderLspClient();

@@ -28,7 +28,7 @@ export async function handleAIQuery(request: AIRequest): Promise<AIResponse> {
       // cwd set to temp dir to prevent claude from loading project .mcp.json,
       // which would spawn a competing MCP server and break the WebSocket connection.
       // --output-format stream-json enables token-by-token streaming via stdout.
-      const proc = spawn("claude", ["-p", "--output-format", "stream-json"], {
+      const proc = spawn("claude", ["-p", "--output-format", "stream-json", "--verbose"], {
         timeout: 120000, // 120 second timeout
         env: { ...process.env },
         shell: true,
