@@ -31182,7 +31182,7 @@ async function handleAIQuery(request) {
   const fullPrompt = buildFullPrompt(request.prompt, request.shaderContext);
   return new Promise((resolve2) => {
     try {
-      const proc = spawn2("claude", ["-p", "--output-format", "stream-json"], {
+      const proc = spawn2("claude", ["-p", "--output-format", "stream-json", "--verbose"], {
         timeout: 12e4,
         // 120 second timeout
         env: { ...process.env },
@@ -31790,7 +31790,7 @@ function registerEditorPlatformResource(server, bridge) {
 async function main() {
   const server = new McpServer({
     name: "unity-shader-tools",
-    version: "0.2.3"
+    version: "0.2.4"
   });
   const bridge = new UnityBridge("ws://localhost:8090");
   const lspClient = new ShaderLspClient();

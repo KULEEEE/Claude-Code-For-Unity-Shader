@@ -241,18 +241,21 @@ namespace ShaderMCP.Editor
                     GUILayout.ExpandHeight(true));
             }
 
-            if (_isAIAnalyzing && string.IsNullOrEmpty(_aiResult))
+            // Cache AI state to prevent Layout/Repaint mismatch
+            bool showAIWaiting = _isAIAnalyzing && string.IsNullOrEmpty(_aiResult);
+            string aiResultCached = _aiResult;
+
+            if (showAIWaiting)
             {
                 EditorGUILayout.Space(4);
                 EditorGUILayout.LabelField("AI is analyzing...",
                     EditorStyles.centeredGreyMiniLabel);
             }
-
-            if (!string.IsNullOrEmpty(_aiResult))
+            else if (!string.IsNullOrEmpty(aiResultCached))
             {
                 EditorGUILayout.Space(4);
                 EditorGUILayout.LabelField("AI Analysis Result", ShaderInspectorStyles.SectionHeader);
-                EditorGUILayout.TextArea(_aiResult, ShaderInspectorStyles.AIResponseArea,
+                EditorGUILayout.TextArea(aiResultCached, ShaderInspectorStyles.AIResponseArea,
                     GUILayout.ExpandHeight(true));
             }
 

@@ -104,6 +104,10 @@ namespace ShaderMCP.Editor
 
         private void DrawChatHistory()
         {
+            // Cache volatile streaming state to prevent Layout/Repaint mismatch
+            bool showThinking = _isWaitingForResponse &&
+                (_streamingMessage == null || string.IsNullOrEmpty(_streamingMessage.content));
+
             _chatScrollPos = EditorGUILayout.BeginScrollView(_chatScrollPos, GUILayout.ExpandHeight(true));
 
             foreach (var msg in _messages)
@@ -137,7 +141,7 @@ namespace ShaderMCP.Editor
                 EditorGUILayout.Space(2);
             }
 
-            if (_isWaitingForResponse && (_streamingMessage == null || string.IsNullOrEmpty(_streamingMessage.content)))
+            if (showThinking)
             {
                 EditorGUILayout.BeginVertical(ShaderInspectorStyles.ChatBubbleAI);
                 var oldColor2 = GUI.color;
