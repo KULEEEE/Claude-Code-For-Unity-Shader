@@ -63,31 +63,31 @@ namespace ShaderMCP.Editor
 
         private void OnGUI()
         {
+            // Cache volatile state at start of OnGUI to prevent layout mismatches
+            bool isRunningNow = _isRunning;
+            bool clientConnected = _connectedClient != null && _connectedClient.Connected;
+            bool mcpRunningCached = _mcpRunning;
+
             EditorGUILayout.Space(5);
 
             // Connection status
             EditorGUILayout.BeginHorizontal();
-            var statusColor = _isRunning ? Color.green : Color.red;
             var oldColor = GUI.color;
-            GUI.color = statusColor;
-            EditorGUILayout.LabelField(_isRunning ? "● Running" : "● Stopped",
+            GUI.color = isRunningNow ? Color.green : Color.red;
+            EditorGUILayout.LabelField(isRunningNow ? "● Running" : "● Stopped",
                 EditorStyles.boldLabel, GUILayout.Width(100));
             GUI.color = oldColor;
 
-            if (_connectedClient != null && _connectedClient.Connected)
-            {
-                GUI.color = Color.cyan;
-                EditorGUILayout.LabelField("Client Connected", GUILayout.Width(120));
-                GUI.color = oldColor;
-            }
+            GUI.color = clientConnected ? Color.cyan : Color.gray;
+            EditorGUILayout.LabelField(clientConnected ? "Client Connected" : "No Client",
+                GUILayout.Width(120));
+            GUI.color = oldColor;
 
             // MCP process status
-            if (_mcpRunning)
-            {
-                GUI.color = Color.green;
-                EditorGUILayout.LabelField("MCP: Running", GUILayout.Width(100));
-                GUI.color = oldColor;
-            }
+            GUI.color = mcpRunningCached ? Color.green : Color.gray;
+            EditorGUILayout.LabelField(mcpRunningCached ? "MCP: Running" : "MCP: Stopped",
+                GUILayout.Width(100));
+            GUI.color = oldColor;
 
             GUILayout.FlexibleSpace();
             EditorGUILayout.EndHorizontal();
@@ -113,14 +113,20 @@ namespace ShaderMCP.Editor
             }
             EditorGUILayout.EndHorizontal();
 
-            // Auto-start MCP toggle
+            // Auto-start MCP toggle (cache state to avoid layout mismatch)
+            bool mcpRunningNow = _mcpRunning;
+            bool serverRunningNow = _isRunning;
             EditorGUILayout.BeginHorizontal();
             _autoStartMCP = EditorGUILayout.ToggleLeft(
                 "Auto-start MCP Server (npx unity-shader-mcp)", _autoStartMCP, GUILayout.Width(350));
-            if (_mcpRunning && GUILayout.Button("Stop MCP", GUILayout.Width(80)))
+            EditorGUI.BeginDisabledGroup(!mcpRunningNow);
+            if (GUILayout.Button("Stop MCP", GUILayout.Width(80)))
                 StopMCPServer();
-            if (!_mcpRunning && _isRunning && GUILayout.Button("Start MCP", GUILayout.Width(80)))
+            EditorGUI.EndDisabledGroup();
+            EditorGUI.BeginDisabledGroup(mcpRunningNow || !serverRunningNow);
+            if (GUILayout.Button("Start MCP", GUILayout.Width(80)))
                 StartMCPServer();
+            EditorGUI.EndDisabledGroup();
             EditorGUILayout.EndHorizontal();
 
             EditorGUILayout.Space(5);
