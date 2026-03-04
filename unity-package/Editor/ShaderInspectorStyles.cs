@@ -34,6 +34,9 @@ namespace ShaderMCP.Editor
         private static GUIStyle _chatBubbleUser;
         private static GUIStyle _chatBubbleAI;
         private static GUIStyle _codeArea;
+        private static GUIStyle _markdownText;
+        private static GUIStyle _codeBlockContainer;
+        private static GUIStyle _codeBlockText;
 
         public static GUIStyle TabNormal
         {
@@ -246,6 +249,64 @@ namespace ShaderMCP.Editor
                     };
                 }
                 return _codeArea;
+            }
+        }
+
+        public static GUIStyle MarkdownText
+        {
+            get
+            {
+                if (_markdownText == null)
+                {
+                    _markdownText = new GUIStyle(EditorStyles.label)
+                    {
+                        richText = true,
+                        wordWrap = true,
+                        fontSize = 12,
+                        padding = new RectOffset(0, 0, 0, 0)
+                    };
+                }
+                return _markdownText;
+            }
+        }
+
+        public static GUIStyle CodeBlockContainer
+        {
+            get
+            {
+                if (_codeBlockContainer == null)
+                {
+                    _codeBlockContainer = new GUIStyle(EditorStyles.helpBox)
+                    {
+                        padding = new RectOffset(8, 8, 6, 6),
+                        margin = new RectOffset(2, 2, 4, 4)
+                    };
+                    var tex = new Texture2D(1, 1);
+                    tex.SetPixel(0, 0, new Color(0.12f, 0.12f, 0.12f));
+                    tex.Apply();
+                    _codeBlockContainer.normal.background = tex;
+                }
+                return _codeBlockContainer;
+            }
+        }
+
+        public static GUIStyle CodeBlockText
+        {
+            get
+            {
+                if (_codeBlockText == null)
+                {
+                    _codeBlockText = new GUIStyle(EditorStyles.label)
+                    {
+                        richText = false,
+                        wordWrap = true,
+                        font = Font.CreateDynamicFontFromOSFont("Consolas", 11),
+                        fontSize = 11,
+                        padding = new RectOffset(4, 4, 2, 2)
+                    };
+                    _codeBlockText.normal.textColor = new Color(0.85f, 0.85f, 0.85f);
+                }
+                return _codeBlockText;
             }
         }
 
