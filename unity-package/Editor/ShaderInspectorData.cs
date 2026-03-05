@@ -286,4 +286,27 @@ namespace ShaderMCP.Editor
             return d;
         }
     }
+
+    public class IncludeTreeNode
+    {
+        public string name;
+        public string path;
+        public int lineCount;
+        public List<IncludeTreeNode> children = new List<IncludeTreeNode>();
+
+        public static IncludeTreeNode Parse(string json)
+        {
+            var node = new IncludeTreeNode();
+            node.name = JsonHelper.GetString(json, "name") ?? "";
+            node.path = JsonHelper.GetString(json, "path") ?? "";
+            node.lineCount = JsonHelper.GetInt(json, "lineCount");
+
+            var childObjects = JsonHelper.GetArrayObjects(json, "children");
+            foreach (var childJson in childObjects)
+            {
+                node.children.Add(Parse(childJson));
+            }
+            return node;
+        }
+    }
 }

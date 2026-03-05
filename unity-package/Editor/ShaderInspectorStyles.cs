@@ -22,6 +22,16 @@ namespace ShaderMCP.Editor
         public static readonly Color DimText = new Color(0.6f, 0.6f, 0.6f);
         public static readonly Color SplitterColor = new Color(0.15f, 0.15f, 0.15f);
 
+        // Graph colors
+        public static readonly Color GraphNodeNormal = new Color(0.22f, 0.22f, 0.28f);
+        public static readonly Color GraphNodeRoot = new Color(0.18f, 0.32f, 0.48f);
+        public static readonly Color GraphNodeSelected = new Color(0.30f, 0.45f, 0.65f);
+        public static readonly Color GraphConnection = new Color(0.5f, 0.5f, 0.6f, 0.8f);
+        public static readonly Color GraphBackground = new Color(0.16f, 0.16f, 0.18f);
+        public static readonly Color GraphNodeBorder = new Color(0.4f, 0.4f, 0.5f);
+        public static readonly Color GraphNodeText = new Color(0.9f, 0.9f, 0.9f);
+        public static readonly Color GraphNodeSubText = new Color(0.6f, 0.6f, 0.7f);
+
         private static GUIStyle _tabNormal;
         private static GUIStyle _tabSelected;
         private static GUIStyle _headerLabel;

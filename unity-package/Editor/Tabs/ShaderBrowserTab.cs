@@ -1,5 +1,6 @@
 using System;
 using System.Collections.Generic;
+using System.Linq;
 using UnityEditor;
 using UnityEngine;
 
@@ -34,6 +35,18 @@ namespace ShaderMCP.Editor
         private bool _isAIAnalyzing;
         private string _aiResult = "";
         private string _aiStatusText;
+
+        // Materials using selected shader
+        private List<MaterialReference> _cachedMaterials;
+        private string _cachedMaterialsShaderPath;
+        private bool _materialsFoldout = true;
+
+        private class MaterialReference
+        {
+            public string name;
+            public string path;
+            public Material material;
+        }
 
         public ShaderBrowserTab(ShaderInspectorWindow window)
         {
@@ -129,7 +142,9 @@ namespace ShaderMCP.Editor
                         _lastResult = "";
                         _lastResultTitle = "";
                         _aiResult = "";
+                        _cachedMaterialsShaderPath = null; // invalidate material cache
                         _window.SetAIContext(shader.path, shader.name);
+                        _window.NotifyShaderSelected(shader.path, shader.name);
                     }
 
                     // Variant count badge
@@ -262,7 +277,85 @@ namespace ShaderMCP.Editor
                 EditorGUILayout.EndVertical();
             }
 
+            // Materials using this shader
+            EditorGUILayout.Space(8);
+            DrawMaterialsSection(shader);
+
             EditorGUILayout.EndScrollView();
+        }
+
+        #endregion
+
+        #region Materials Section
+
+        private void DrawMaterialsSection(ShaderInfo shader)
+        {
+            // Refresh material cache if shader changed
+            if (_cachedMaterialsShaderPath != shader.path)
+            {
+                FindMaterialsUsingShader(shader);
+            }
+
+            int count = _cachedMaterials?.Count ?? 0;
+            _materialsFoldout = EditorGUILayout.Foldout(_materialsFoldout,
+                $"Materials Using This Shader ({count})", true, EditorStyles.foldoutHeader);
+
+            if (!_materialsFoldout || _cachedMaterials == null || _cachedMaterials.Count == 0)
+            {
+                if (_materialsFoldout && count == 0)
+                {
+                    EditorGUILayout.LabelField("  No materials found.", EditorStyles.miniLabel);
+                }
+                return;
+            }
+
+            EditorGUI.indentLevel++;
+            foreach (var mat in _cachedMaterials)
+            {
+                EditorGUILayout.BeginHorizontal();
+                EditorGUILayout.LabelField(mat.name, GUILayout.ExpandWidth(true));
+
+                if (GUILayout.Button("Ping", EditorStyles.miniButton, GUILayout.Width(40)))
+                {
+                    if (mat.material != null)
+                        EditorGUIUtility.PingObject(mat.material);
+                }
+                if (GUILayout.Button("Select", EditorStyles.miniButton, GUILayout.Width(50)))
+                {
+                    if (mat.material != null)
+                        Selection.activeObject = mat.material;
+                }
+
+                EditorGUILayout.EndHorizontal();
+            }
+            EditorGUI.indentLevel--;
+        }
+
+        private void FindMaterialsUsingShader(ShaderInfo shader)
+        {
+            _cachedMaterials = new List<MaterialReference>();
+            _cachedMaterialsShaderPath = shader.path;
+
+            var shaderAsset = AssetDatabase.LoadAssetAtPath<Shader>(shader.path);
+            if (shaderAsset == null) return;
+
+            string[] guids = AssetDatabase.FindAssets("t:Material");
+            foreach (string guid in guids)
+            {
+                string matPath = AssetDatabase.GUIDToAssetPath(guid);
+                var mat = AssetDatabase.LoadAssetAtPath<Material>(matPath);
+                if (mat != null && mat.shader == shaderAsset)
+                {
+                    _cachedMaterials.Add(new MaterialReference
+                    {
+                        name = mat.name,
+                        path = matPath,
+                        material = mat
+                    });
+                }
+            }
+
+            _cachedMaterials = _cachedMaterials.OrderBy(m => m.name).ToList();
         }
 
         #endregion
