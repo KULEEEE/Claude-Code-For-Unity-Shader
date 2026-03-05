@@ -31181,7 +31181,7 @@ import { tmpdir } from "os";
 import { fileURLToPath } from "url";
 import { dirname, join } from "path";
 async function handleAIQuery(request) {
-  const fullPrompt = buildFullPrompt(request.prompt, request.shaderContext);
+  const fullPrompt = buildFullPrompt(request.prompt, request.shaderContext, request.language);
   try {
     let resultText = "";
     request.onStatus?.("\u23F3 Claude Code \uC791\uC5C5 \uC2DC\uC791...");
@@ -31234,8 +31234,15 @@ async function handleAIQuery(request) {
     return { success: false, error: msg };
   }
 }
-function buildFullPrompt(userPrompt, shaderContext) {
-  let prompt = "You are a Unity shader expert assistant. Answer clearly and concisely. Use the user's language when possible. When suggesting code changes, provide specific code snippets.\n\n";
+function buildFullPrompt(userPrompt, shaderContext, language) {
+  let prompt = "You are a Unity shader expert assistant. Answer clearly and concisely. When suggesting code changes, provide specific code snippets.\n";
+  if (language) {
+    prompt += `IMPORTANT: You MUST respond in ${language}.
+`;
+  } else {
+    prompt += "Use the user's language when possible.\n";
+  }
+  prompt += "\n";
   if (shaderContext) {
     prompt += `Shader Context:
 ${shaderContext}
@@ -31806,6 +31813,7 @@ async function main() {
       const result = await handleAIQuery({
         prompt: params.prompt,
         shaderContext: params.shaderContext,
+        language: params.language,
         onChunk: (chunk) => {
           bridge.sendRaw({ method: "ai/chunk", id, chunk });
         },

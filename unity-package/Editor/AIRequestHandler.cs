@@ -54,7 +54,7 @@ namespace ShaderMCP.Editor
         /// <param name="onChunk">Called for each streaming chunk (may be null).</param>
         /// <param name="onComplete">Called with the full response text when complete.</param>
         /// <param name="onStatus">Called with progress status updates (may be null).</param>
-        public static void SendQuery(string prompt, string shaderContext, Action<string> onChunk, Action<string> onComplete, Action<string> onStatus = null)
+        public static void SendQuery(string prompt, string shaderContext, Action<string> onChunk, Action<string> onComplete, Action<string> onStatus = null, string language = null)
         {
             if (!IsAvailable)
             {
@@ -73,6 +73,9 @@ namespace ShaderMCP.Editor
 
             if (!string.IsNullOrEmpty(shaderContext))
                 msgBuilder.Key("shaderContext").Value(shaderContext);
+
+            if (!string.IsNullOrEmpty(language))
+                msgBuilder.Key("language").Value(language);
 
             msgBuilder.EndObject();
             string message = msgBuilder.ToString();
