@@ -31,6 +31,12 @@ namespace ShaderMCP.Editor
         private string _pipelineType = "...";
         private bool _aiConnected;
 
+        // Language setting (shared across all tabs)
+        private int _languageIndex;
+        private static readonly string[] LanguageLabels = { "Auto", "한국어", "English", "日本語", "中文" };
+        private static readonly string[] LanguageCodes = { "", "Korean", "English", "Japanese", "Chinese" };
+        public string SelectedLanguage => _languageIndex > 0 ? LanguageCodes[_languageIndex] : null;
+
         [MenuItem("Tools/Shader MCP/Shader Inspector")]
         public static void ShowWindow()
         {
@@ -92,6 +98,9 @@ namespace ShaderMCP.Editor
 
             GUILayout.Label("Shader Inspector", ShaderInspectorStyles.HeaderLabel);
             GUILayout.FlexibleSpace();
+
+            EditorGUILayout.LabelField("Lang:", EditorStyles.miniLabel, GUILayout.Width(30));
+            _languageIndex = EditorGUILayout.Popup(_languageIndex, LanguageLabels, EditorStyles.toolbarPopup, GUILayout.Width(65));
 
             if (GUILayout.Button("Refresh All", EditorStyles.toolbarButton, GUILayout.Width(80)))
             {
