@@ -33,6 +33,7 @@ namespace ShaderMCP.Editor
         private bool _isAnalyzing;
         private bool _isAIAnalyzing;
         private string _aiResult = "";
+        private string _aiStatusText;
 
         public ShaderBrowserTab(ShaderInspectorWindow window)
         {
@@ -248,7 +249,8 @@ namespace ShaderMCP.Editor
             if (showAIWaiting)
             {
                 EditorGUILayout.Space(4);
-                EditorGUILayout.LabelField("AI is analyzing...",
+                string statusDisplay = !string.IsNullOrEmpty(_aiStatusText) ? _aiStatusText : "AI is analyzing...";
+                EditorGUILayout.LabelField(statusDisplay,
                     EditorStyles.centeredGreyMiniLabel);
             }
             else if (!string.IsNullOrEmpty(aiResultCached))
@@ -293,6 +295,8 @@ namespace ShaderMCP.Editor
             string shaderContext = GatherShaderContext(shader);
             string prompt = BuildAIPrompt(analysisType, shader.name);
 
+            _aiStatusText = null;
+
             AIRequestHandler.SendQuery(prompt, shaderContext,
                 onChunk: chunk =>
                 {
@@ -302,7 +306,13 @@ namespace ShaderMCP.Editor
                 onComplete: fullText =>
                 {
                     _aiResult = fullText ?? "No response from AI.";
+                    _aiStatusText = null;
                     _isAIAnalyzing = false;
+                    _window.Repaint();
+                },
+                onStatus: status =>
+                {
+                    _aiStatusText = status;
                     _window.Repaint();
                 }
             );
