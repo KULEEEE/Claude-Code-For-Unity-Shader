@@ -6,6 +6,7 @@ import { dirname, join } from "path";
 interface AIRequest {
   prompt: string;
   shaderContext?: string;
+  language?: string;
   onChunk?: (chunk: string) => void;
   onStatus?: (status: string) => void;
 }
@@ -22,7 +23,7 @@ interface AIResponse {
  * Streams tokens in real-time via onChunk callback.
  */
 export async function handleAIQuery(request: AIRequest): Promise<AIResponse> {
-  const fullPrompt = buildFullPrompt(request.prompt, request.shaderContext);
+  const fullPrompt = buildFullPrompt(request.prompt, request.shaderContext, request.language);
 
   try {
     let resultText = "";
@@ -92,12 +93,21 @@ export async function handleAIQuery(request: AIRequest): Promise<AIResponse> {
 
 function buildFullPrompt(
   userPrompt: string,
-  shaderContext?: string
+  shaderContext?: string,
+  language?: string
 ): string {
   let prompt =
     "You are a Unity shader expert assistant. " +
-    "Answer clearly and concisely. Use the user's language when possible. " +
-    "When suggesting code changes, provide specific code snippets.\n\n";
+    "Answer clearly and concisely. " +
+    "When suggesting code changes, provide specific code snippets.\n";
+
+  if (language) {
+    prompt += `IMPORTANT: You MUST respond in ${language}.\n`;
+  } else {
+    prompt += "Use the user's language when possible.\n";
+  }
+
+  prompt += "\n";
 
   if (shaderContext) {
     prompt += `Shader Context:\n${shaderContext}\n\n`;
