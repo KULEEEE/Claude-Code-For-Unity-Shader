@@ -50,14 +50,11 @@ export async function handleAIQuery(request: AIRequest): Promise<AIResponse> {
         request.onStatus?.("⏳ Claude Code 작업 중...");
       }
 
-      // assistant message: extract text chunks + tool use status
+      // assistant message: show tool use status (text comes from result)
       if (msg.type === "assistant") {
         const content = (msg as any).message?.content;
         if (Array.isArray(content)) {
           for (const block of content) {
-            if (block.type === "text" && block.text) {
-              request.onChunk?.(block.text);
-            }
             if (block.type === "tool_use") {
               request.onStatus?.(`⚙️ ${block.name}`);
             }
@@ -77,9 +74,6 @@ export async function handleAIQuery(request: AIRequest): Promise<AIResponse> {
         const event = (msg as any).event;
         if (event?.type === "content_block_start" && event.content_block?.type === "tool_use") {
           request.onStatus?.(`⚙️ ${event.content_block.name}...`);
-        }
-        if (event?.type === "content_block_delta" && event.delta?.type === "text_delta") {
-          request.onChunk?.(event.delta.text);
         }
       }
 
