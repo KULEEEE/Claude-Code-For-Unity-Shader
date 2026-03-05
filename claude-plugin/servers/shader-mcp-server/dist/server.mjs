@@ -31185,7 +31185,11 @@ async function handleAIQuery(request) {
     request.onStatus?.("\u23F3 Claude Code \uC791\uC5C5 \uC2DC\uC791...");
     for await (const msg of query({
       prompt: fullPrompt,
-      options: { cwd: tmpdir() }
+      options: {
+        cwd: tmpdir(),
+        permissionMode: "bypassPermissions",
+        allowDangerouslySkipPermissions: true
+      }
     })) {
       if (msg.type === "system") {
         request.onStatus?.("\u23F3 Claude Code \uC791\uC5C5 \uC911...");

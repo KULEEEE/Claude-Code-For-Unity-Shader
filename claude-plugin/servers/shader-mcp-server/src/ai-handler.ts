@@ -29,7 +29,11 @@ export async function handleAIQuery(request: AIRequest): Promise<AIResponse> {
 
     for await (const msg of query({
       prompt: fullPrompt,
-      options: { cwd: tmpdir() },
+      options: {
+        cwd: tmpdir(),
+        permissionMode: "bypassPermissions",
+        allowDangerouslySkipPermissions: true,
+      },
     })) {
       if (msg.type === "system") {
         request.onStatus?.("⏳ Claude Code 작업 중...");
