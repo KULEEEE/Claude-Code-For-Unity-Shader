@@ -27,10 +27,6 @@ namespace ShaderMCP.Editor
         private string _contextShaderName;
         private string _contextShaderCode;
 
-        // Language
-        private int _languageIndex;
-        private static readonly string[] LanguageLabels = { "Auto", "한국어", "English", "日本語", "中文" };
-        private static readonly string[] LanguageCodes = { "", "Korean", "English", "Japanese", "Chinese" };
 
         // Quick presets
         private bool _showQuickMenu;
@@ -94,9 +90,6 @@ namespace ShaderMCP.Editor
             }
 
             GUILayout.FlexibleSpace();
-
-            EditorGUILayout.LabelField("Lang:", EditorStyles.miniLabel, GUILayout.Width(30));
-            _languageIndex = EditorGUILayout.Popup(_languageIndex, LanguageLabels, EditorStyles.toolbarPopup, GUILayout.Width(65));
 
             if (GUILayout.Button("Clear Chat", EditorStyles.toolbarButton, GUILayout.Width(70)))
             {
@@ -315,7 +308,7 @@ namespace ShaderMCP.Editor
                     _scrollToBottom = true;
                     _window.Repaint();
                 },
-                language: _languageIndex > 0 ? LanguageCodes[_languageIndex] : null
+                language: _window.SelectedLanguage
             );
 
             _window.Repaint();

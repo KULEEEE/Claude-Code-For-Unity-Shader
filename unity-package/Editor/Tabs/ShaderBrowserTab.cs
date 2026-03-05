@@ -315,7 +315,8 @@ namespace ShaderMCP.Editor
                 {
                     _aiStatusText = status;
                     _window.Repaint();
-                }
+                },
+                language: _window.SelectedLanguage
             );
         }
 
