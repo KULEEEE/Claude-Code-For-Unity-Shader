@@ -23,7 +23,8 @@
 
 - **Unity** 2021.3 LTS or higher (Unity 6.0+ recommended)
 - **Node.js** 18+
-- **AI Coding Assistant** (any one of the following):
+- **Claude Code** installed and authenticated (AI Chat / AI Analysis features use the [Claude Agent SDK](https://www.npmjs.com/package/@anthropic-ai/claude-agent-sdk) internally)
+- **AI Coding Assistant** (any MCP-compatible client for direct tool access):
   - [Claude Code](https://docs.anthropic.com/en/docs/claude-code)
   - [Codex CLI](https://github.com/openai/codex)
   - [OpenCode](https://github.com/opencode-ai/opencode)
@@ -163,6 +164,14 @@ The Unity package includes a built-in **Shader Inspector** window with AI integr
 
 Open via **Tools > Shader MCP > Shader Inspector**
 
+### Main Toolbar
+
+| Element | Description |
+|---------|-------------|
+| **Shader Inspector** | Window title |
+| **Lang** | Response language selector — **Auto**, 한국어, English, 日本語, 中文. Applies to all AI features (AI Chat and AI Analysis) |
+| **Refresh All** | Refresh all tabs |
+
 ### Tabs
 
 | Tab | Description |
@@ -171,20 +180,38 @@ Open via **Tools > Shader MCP > Shader Inspector**
 | **Materials** | Browse materials grouped by shader, view properties/keywords, navigate to shader |
 | **Pipeline** | Read-only dashboard of render pipeline, quality settings, and platform info |
 | **Logs** | Shader-related log viewer with severity filter and AI error analysis |
-| **AI Chat** | Free-form chat with Claude about shaders, auto-attaches selected shader as context, **Markdown rendering** for AI responses |
+| **AI Chat** | Free-form chat with Claude about shaders, auto-attaches selected shader as context |
 
-### Features
+### AI Features
+
+#### AI Chat
+- Free-form conversation about shaders with Claude
+- Auto-attaches selected shader as context
+- **Markdown rendering** — headers, bold, italic, code blocks with copy button, lists, blockquotes
+- **Quick presets** for common queries (Optimize, Explain errors, etc.)
+- **Conversation history** — multi-turn context (last 10 messages)
+
+#### AI Analysis (Shaders Tab)
+- **Error Analysis** — Analyze compilation errors and suggest fixes
+- **Optimize** — Performance optimization suggestions with code examples
+- **Explain Code** — Non-programmer-friendly explanation of shader behavior
+- **Diagnose** — Comprehensive diagnostic report with severity levels
+- Results rendered in **Markdown** format
+
+#### Real-time Progress Status
+During AI queries, the UI shows real-time progress instead of a static "thinking" message:
+- `⏳ Claude Code 작업 시작...` — Query initiated
+- `⏳ Claude Code 작업 중...` — Processing
+- `⚙️ compile_shader` — Using MCP tools (shader compilation, variant analysis, etc.)
+- `⚙️ analyze_shader_variants (5s)` — Tool progress with elapsed time
+
+The built-in AI uses the [Claude Agent SDK](https://www.npmjs.com/package/@anthropic-ai/claude-agent-sdk) which automatically has access to all shader MCP tools (`compile_shader`, `analyze_shader_variants`, `get_shader_code`, etc.), enabling Claude to actively inspect your project during analysis.
+
+### Other Features
 
 - **Drag & drop** shaders/materials into the window
 - **Basic analysis** runs locally in Unity (instant)
-- **AI analysis** routes through MCP server to Claude CLI (requires MCP server connection)
 - **Cross-tab navigation** (e.g., "Go to Shader" from Materials tab)
-- **Quick presets** for common AI queries
-- **AI Chat Markdown Viewer** — AI 응답을 Markdown으로 렌더링:
-  - Headers, **bold**, *italic*, `inline code` highlighting
-  - Code blocks with dark background, Consolas monospace font, and **Copy Code** button
-  - Bullet/numbered lists, blockquotes, horizontal rules
-  - Links, ~~strikethrough~~ display
 
 ---
 
@@ -325,15 +352,15 @@ The MCP server integrates [shader-language-server](https://github.com/shader-ls/
 - **ShaderCompileWatcher.cs**: Shader-related log filtering
 - **MessageHandler.cs**: JSON message routing
 - **JsonHelper.cs**: Supplements for JsonUtility limitations
-- **ShaderInspectorWindow.cs**: Shader Inspector EditorWindow with tabbed UI
-- **AIRequestHandler.cs**: AI query routing (Unity → MCP → Claude CLI)
-- **MarkdownRenderer.cs**: Markdown → IMGUI rich text renderer for AI Chat responses
+- **ShaderInspectorWindow.cs**: Shader Inspector EditorWindow with tabbed UI and global language selector
+- **AIRequestHandler.cs**: AI query routing with streaming support (Unity → MCP → Agent SDK → Claude)
+- **MarkdownRenderer.cs**: Markdown → IMGUI rich text renderer for AI responses
 - **Tabs/**: ShaderBrowser, MaterialBrowser, PipelineDashboard, ShaderLogs, AIChat
 
 ### Node.js MCP Server (`claude-plugin/servers/shader-mcp-server/`)
-- **unity-bridge.ts**: Unity WebSocket client (auto-reconnect, UUID matching, AI message relay)
+- **unity-bridge.ts**: Unity WebSocket client (auto-reconnect, UUID matching, AI/status message relay)
 - **lsp-client.ts**: ShaderLab LSP client (wraps [shader-ls](https://github.com/shader-ls/shader-language-server), auto-install)
-- **ai-handler.ts**: Claude CLI invocation for AI analysis features
+- **ai-handler.ts**: Claude Agent SDK integration — uses `query()` async generator with MCP tools and real-time progress status
 - **tools/**: MCP Tool definitions (7 Unity tools + 4 LSP tools)
 - **resources/**: MCP Resource definitions (4 resources)
 - **index.ts**: McpServer + StdioServerTransport entry point
