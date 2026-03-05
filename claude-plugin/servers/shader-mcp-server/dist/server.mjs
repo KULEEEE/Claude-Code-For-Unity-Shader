@@ -31178,17 +31178,26 @@ Please install manually: dotnet tool install --global shader-ls`);
 // build/ai-handler.js
 import { query } from "@anthropic-ai/claude-agent-sdk";
 import { tmpdir } from "os";
+import { fileURLToPath } from "url";
+import { dirname, join } from "path";
 async function handleAIQuery(request) {
   const fullPrompt = buildFullPrompt(request.prompt, request.shaderContext);
   try {
     let resultText = "";
     request.onStatus?.("\u23F3 Claude Code \uC791\uC5C5 \uC2DC\uC791...");
+    const serverPath = join(dirname(fileURLToPath(import.meta.url)), "server.mjs");
     for await (const msg of query({
       prompt: fullPrompt,
       options: {
         cwd: tmpdir(),
         permissionMode: "bypassPermissions",
-        allowDangerouslySkipPermissions: true
+        allowDangerouslySkipPermissions: true,
+        mcpServers: {
+          "unity-shader-tools": {
+            command: "node",
+            args: [serverPath]
+          }
+        }
       }
     })) {
       if (msg.type === "system") {

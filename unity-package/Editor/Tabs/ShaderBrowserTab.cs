@@ -257,8 +257,9 @@ namespace ShaderMCP.Editor
             {
                 EditorGUILayout.Space(4);
                 EditorGUILayout.LabelField("AI Analysis Result", ShaderInspectorStyles.SectionHeader);
-                EditorGUILayout.TextArea(aiResultCached, ShaderInspectorStyles.AIResponseArea,
-                    GUILayout.ExpandHeight(true));
+                EditorGUILayout.BeginVertical(ShaderInspectorStyles.ChatBubbleAI);
+                MarkdownRenderer.Render(aiResultCached);
+                EditorGUILayout.EndVertical();
             }
 
             EditorGUILayout.EndScrollView();

@@ -1,5 +1,7 @@
 import { query } from "@anthropic-ai/claude-agent-sdk";
 import { tmpdir } from "os";
+import { fileURLToPath } from "url";
+import { dirname, join } from "path";
 
 interface AIRequest {
   prompt: string;
@@ -27,12 +29,21 @@ export async function handleAIQuery(request: AIRequest): Promise<AIResponse> {
 
     request.onStatus?.("⏳ Claude Code 작업 시작...");
 
+    // Resolve path to this MCP server's entry point for the Agent SDK
+    const serverPath = join(dirname(fileURLToPath(import.meta.url)), "server.mjs");
+
     for await (const msg of query({
       prompt: fullPrompt,
       options: {
         cwd: tmpdir(),
         permissionMode: "bypassPermissions",
         allowDangerouslySkipPermissions: true,
+        mcpServers: {
+          "unity-shader-tools": {
+            command: "node",
+            args: [serverPath],
+          },
+        },
       },
     })) {
       if (msg.type === "system") {
