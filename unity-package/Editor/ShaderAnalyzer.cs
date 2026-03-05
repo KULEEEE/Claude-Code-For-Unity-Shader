@@ -408,6 +408,107 @@ namespace ShaderMCP.Editor
 
         #endregion
 
+        #region Include Tree
+
+        public static string GetIncludeTree(string shaderPath)
+        {
+            string filePath = shaderPath;
+            if (!File.Exists(filePath))
+            {
+                filePath = Path.Combine(Application.dataPath, "..", shaderPath);
+                if (!File.Exists(filePath))
+                {
+                    return JsonHelper.StartObject()
+                        .Key("error").Value($"Shader file not found: {shaderPath}")
+                        .ToString();
+                }
+            }
+
+            string code = File.ReadAllText(filePath);
+            int lineCount = code.Split('\n').Length;
+            string fileName = Path.GetFileName(filePath);
+
+            var visited = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+            visited.Add(Path.GetFullPath(filePath));
+
+            var builder = JsonHelper.StartObject()
+                .Key("name").Value(fileName)
+                .Key("path").Value(shaderPath)
+                .Key("lineCount").Value(lineCount)
+                .Key("children").BeginArray();
+
+            BuildIncludeTreeChildren(code, Path.GetDirectoryName(Path.GetFullPath(filePath)), builder, visited);
+
+            builder.EndArray();
+            return builder.ToString();
+        }
+
+        private static void BuildIncludeTreeChildren(string code, string basePath,
+            JsonHelper.JsonBuilder builder, HashSet<string> visited)
+        {
+            string[] lines = code.Split('\n');
+            foreach (string line in lines)
+            {
+                string trimmed = line.Trim();
+                if (!trimmed.StartsWith("#include")) continue;
+
+                int start = trimmed.IndexOf('"');
+                int end = trimmed.LastIndexOf('"');
+                if (start < 0 || end <= start) continue;
+
+                string includePath = trimmed.Substring(start + 1, end - start - 1);
+
+                string fullPath = Path.GetFullPath(Path.Combine(basePath, includePath));
+                if (!File.Exists(fullPath))
+                {
+                    string dataPath = Application.dataPath;
+                    fullPath = Path.GetFullPath(Path.Combine(dataPath, includePath));
+                    if (!File.Exists(fullPath))
+                    {
+                        fullPath = Path.GetFullPath(Path.Combine(dataPath, "..", "Packages", includePath));
+                    }
+                }
+
+                if (!File.Exists(fullPath)) continue;
+
+                string normalizedPath = Path.GetFullPath(fullPath);
+                if (visited.Contains(normalizedPath)) continue;
+
+                visited.Add(normalizedPath);
+
+                string childCode;
+                int childLineCount;
+                try
+                {
+                    childCode = File.ReadAllText(fullPath);
+                    childLineCount = childCode.Split('\n').Length;
+                }
+                catch
+                {
+                    continue;
+                }
+
+                string relativePath = fullPath;
+                string assetsRoot = Path.GetFullPath(Path.Combine(Application.dataPath, ".."));
+                if (relativePath.StartsWith(assetsRoot))
+                {
+                    relativePath = relativePath.Substring(assetsRoot.Length + 1).Replace('\\', '/');
+                }
+
+                builder.BeginObject()
+                    .Key("name").Value(Path.GetFileName(fullPath))
+                    .Key("path").Value(relativePath)
+                    .Key("lineCount").Value(childLineCount)
+                    .Key("children").BeginArray();
+
+                BuildIncludeTreeChildren(childCode, Path.GetDirectoryName(fullPath), builder, visited);
+
+                builder.EndArray().EndObject();
+            }
+        }
+
+        #endregion
+
         #region Include Files
 
         public static string GetIncludeFiles()

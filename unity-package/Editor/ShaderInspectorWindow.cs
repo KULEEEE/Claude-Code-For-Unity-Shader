@@ -1,4 +1,3 @@
-using System;
 using UnityEditor;
 using UnityEngine;
 
@@ -6,22 +5,19 @@ namespace ShaderMCP.Editor
 {
     /// <summary>
     /// Main Shader Inspector EditorWindow.
-    /// Provides tabbed interface for shader browsing, material inspection,
-    /// pipeline dashboard, logs, and AI chat.
+    /// Provides tabbed interface for shader browsing, include graph, and AI chat.
     /// Menu: Tools > Shader MCP > Shader Inspector
     /// </summary>
     public class ShaderInspectorWindow : EditorWindow
     {
-        private enum Tab { Shaders, Materials, Pipeline, Logs, AIChat }
-        private static readonly string[] TabNames = { "Shaders", "Materials", "Pipeline", "Logs", "AI Chat" };
+        private enum Tab { Shaders, Graph, AIChat }
+        private static readonly string[] TabNames = { "Shaders", "Graph", "AI Chat" };
 
         private Tab _currentTab = Tab.Shaders;
 
         // Tab instances
         private ShaderBrowserTab _shaderTab;
-        private MaterialBrowserTab _materialTab;
-        private PipelineDashboardTab _pipelineTab;
-        private ShaderLogsTab _logsTab;
+        private IncludeGraphTab _graphTab;
         private AIChatTab _aiChatTab;
 
         // Shared state across tabs
@@ -47,9 +43,7 @@ namespace ShaderMCP.Editor
         private void OnEnable()
         {
             _shaderTab = new ShaderBrowserTab(this);
-            _materialTab = new MaterialBrowserTab(this);
-            _pipelineTab = new PipelineDashboardTab();
-            _logsTab = new ShaderLogsTab(this);
+            _graphTab = new IncludeGraphTab(this);
             _aiChatTab = new AIChatTab(this);
 
             RefreshPipelineInfo();
@@ -144,14 +138,8 @@ namespace ShaderMCP.Editor
                 case Tab.Shaders:
                     _shaderTab?.OnGUI();
                     break;
-                case Tab.Materials:
-                    _materialTab?.OnGUI();
-                    break;
-                case Tab.Pipeline:
-                    _pipelineTab?.OnGUI();
-                    break;
-                case Tab.Logs:
-                    _logsTab?.OnGUI();
+                case Tab.Graph:
+                    _graphTab?.OnGUI();
                     break;
                 case Tab.AIChat:
                     _aiChatTab?.OnGUI();
@@ -207,10 +195,16 @@ namespace ShaderMCP.Editor
                         _currentTab = Tab.Shaders;
                         _shaderTab?.SelectShader(path);
                     }
-                    else if (obj is Material)
+                    else if (obj is Material mat)
                     {
-                        _currentTab = Tab.Materials;
-                        _materialTab?.SelectMaterial(path);
+                        // Navigate to the material's shader in Shaders tab
+                        _currentTab = Tab.Shaders;
+                        if (mat.shader != null)
+                        {
+                            string shaderPath = AssetDatabase.GetAssetPath(mat.shader);
+                            if (!string.IsNullOrEmpty(shaderPath))
+                                _shaderTab?.SelectShader(shaderPath);
+                        }
                     }
                     Repaint();
                 }
@@ -249,6 +243,14 @@ namespace ShaderMCP.Editor
             Repaint();
         }
 
+        /// <summary>Notify the Graph tab when a shader is selected.</summary>
+        public void NotifyShaderSelected(string path, string name)
+        {
+            _selectedShaderPath = path;
+            _selectedShaderName = name;
+            _graphTab?.SetShader(path, name);
+        }
+
         public string SelectedShaderPath => _selectedShaderPath;
         public string SelectedShaderName => _selectedShaderName;
         public bool IsAIConnected => _aiConnected;
@@ -260,9 +262,7 @@ namespace ShaderMCP.Editor
         private void RefreshAll()
         {
             _shaderTab?.Refresh();
-            _materialTab?.Refresh();
-            _pipelineTab?.Refresh();
-            _logsTab?.Refresh();
+            _graphTab?.Refresh();
             RefreshPipelineInfo();
             CheckAIConnection();
         }
