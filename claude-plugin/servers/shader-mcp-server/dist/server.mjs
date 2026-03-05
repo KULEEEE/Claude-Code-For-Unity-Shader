@@ -31207,9 +31207,6 @@ async function handleAIQuery(request) {
         const content = msg.message?.content;
         if (Array.isArray(content)) {
           for (const block of content) {
-            if (block.type === "text" && block.text) {
-              request.onChunk?.(block.text);
-            }
             if (block.type === "tool_use") {
               request.onStatus?.(`\u2699\uFE0F ${block.name}`);
             }
@@ -31225,9 +31222,6 @@ async function handleAIQuery(request) {
         const event = msg.event;
         if (event?.type === "content_block_start" && event.content_block?.type === "tool_use") {
           request.onStatus?.(`\u2699\uFE0F ${event.content_block.name}...`);
-        }
-        if (event?.type === "content_block_delta" && event.delta?.type === "text_delta") {
-          request.onChunk?.(event.delta.text);
         }
       }
       if (msg.type === "result") {
