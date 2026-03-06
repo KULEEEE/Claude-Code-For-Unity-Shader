@@ -31178,10 +31178,12 @@ Please install manually: dotnet tool install --global shader-ls`);
 // build/ai-handler.js
 import { query } from "@anthropic-ai/claude-agent-sdk";
 import { tmpdir } from "os";
+import { existsSync } from "fs";
 import { fileURLToPath } from "url";
 import { dirname, join } from "path";
 async function handleAIQuery(request) {
-  const fullPrompt = buildFullPrompt(request.prompt, request.shaderContext, request.language);
+  const fullPrompt = buildFullPrompt(request.prompt, request.shaderContext, request.language, request.projectPath);
+  const cwd = request.projectPath && existsSync(request.projectPath) ? request.projectPath : tmpdir();
   try {
     let resultText = "";
     request.onStatus?.("\u23F3 Claude Code \uC791\uC5C5 \uC2DC\uC791...");
@@ -31189,7 +31191,7 @@ async function handleAIQuery(request) {
     for await (const msg of query({
       prompt: fullPrompt,
       options: {
-        cwd: tmpdir(),
+        cwd,
         permissionMode: "bypassPermissions",
         allowDangerouslySkipPermissions: true,
         mcpServers: {
@@ -31234,8 +31236,12 @@ async function handleAIQuery(request) {
     return { success: false, error: msg };
   }
 }
-function buildFullPrompt(userPrompt, shaderContext, language) {
-  let prompt = "You are a Unity shader expert assistant. Answer clearly and concisely. When suggesting code changes, provide specific code snippets.\n";
+function buildFullPrompt(userPrompt, shaderContext, language, projectPath) {
+  let prompt = "You are a Unity shader expert assistant embedded in a Unity Editor plugin. You can read, create, modify, and delete shader files in the Unity project. Do NOT ask the user for file paths or project paths \u2014 the working directory is already set to the Unity project root. Answer clearly and concisely. When the user asks you to modify or create files, do it directly.\n";
+  if (projectPath) {
+    prompt += `Unity project path: ${projectPath}
+`;
+  }
   if (language) {
     prompt += `IMPORTANT: You MUST respond in ${language}.
 `;
@@ -31814,6 +31820,7 @@ async function main() {
         prompt: params.prompt,
         shaderContext: params.shaderContext,
         language: params.language,
+        projectPath: params.projectPath,
         onChunk: (chunk) => {
           bridge.sendRaw({ method: "ai/chunk", id, chunk });
         },

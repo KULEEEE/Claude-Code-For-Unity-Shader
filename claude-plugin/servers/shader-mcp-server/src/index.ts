@@ -56,7 +56,7 @@ async function main(): Promise<void> {
     if (msg.method !== "ai/query") return;
 
     const id = msg.id as string;
-    const params = msg.params as { prompt?: string; shaderContext?: string; language?: string } | undefined;
+    const params = msg.params as { prompt?: string; shaderContext?: string; language?: string; projectPath?: string } | undefined;
 
     if (!id || !params?.prompt) {
       console.error("[ShaderMCP] Invalid AI query: missing id or prompt");
@@ -70,6 +70,7 @@ async function main(): Promise<void> {
         prompt: params.prompt,
         shaderContext: params.shaderContext,
         language: params.language,
+        projectPath: params.projectPath,
         onChunk: (chunk: string) => {
           bridge.sendRaw({ method: "ai/chunk", id, chunk });
         },

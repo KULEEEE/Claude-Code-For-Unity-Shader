@@ -77,6 +77,11 @@ namespace ShaderMCP.Editor
             if (!string.IsNullOrEmpty(language))
                 msgBuilder.Key("language").Value(language);
 
+            // Send Unity project path so the agent can operate on project files
+            string projectPath = System.IO.Path.GetFullPath(
+                System.IO.Path.Combine(UnityEngine.Application.dataPath, ".."));
+            msgBuilder.Key("projectPath").Value(projectPath);
+
             msgBuilder.EndObject();
             string message = msgBuilder.ToString();
 

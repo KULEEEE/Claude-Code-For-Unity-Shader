@@ -44,6 +44,12 @@ namespace ShaderMCP.Editor
         // Scroll for info panel
         private Vector2 _infoScrollPos;
 
+        // AI analysis state
+        private string _aiResult = "";
+        private bool _isAIAnalyzing;
+        private string _aiStatusText;
+        private int _aiAnalyzedNodeIndex = -1;
+
         private class GraphNode
         {
             public string name;
@@ -206,6 +212,15 @@ namespace ShaderMCP.Editor
                         int clickedNode = HitTestNode(localMouse);
                         if (clickedNode >= 0)
                         {
+                            if (_selectedNodeIndex != clickedNode)
+                            {
+                                // Clear AI result when switching to a different node
+                                if (_aiAnalyzedNodeIndex != clickedNode)
+                                {
+                                    _aiResult = "";
+                                    _aiStatusText = null;
+                                }
+                            }
                             _selectedNodeIndex = clickedNode;
 
                             // Double-click: open file
@@ -411,6 +426,42 @@ namespace ShaderMCP.Editor
                     if (asset != null) EditorGUIUtility.PingObject(asset);
                 }
 
+                // AI section
+                EditorGUILayout.Space(8);
+                EditorGUILayout.LabelField("AI", ShaderInspectorStyles.SectionHeader);
+
+                EditorGUI.BeginDisabledGroup(_isAIAnalyzing || !_window.IsAIConnected);
+                EditorGUILayout.BeginHorizontal();
+                if (GUILayout.Button("Explain File", GUILayout.Height(24)))
+                    RunAIAnalysis(node, "explain");
+                if (GUILayout.Button("Role in Shader", GUILayout.Height(24)))
+                    RunAIAnalysis(node, "role");
+                EditorGUILayout.EndHorizontal();
+                EditorGUI.EndDisabledGroup();
+
+                if (!_window.IsAIConnected)
+                {
+                    EditorGUILayout.HelpBox("AI not available. Ensure MCP server is connected.", MessageType.Info);
+                }
+
+                // AI result display
+                bool showAIWaiting = _isAIAnalyzing && string.IsNullOrEmpty(_aiResult);
+                string aiResultCached = _aiResult;
+
+                if (showAIWaiting)
+                {
+                    EditorGUILayout.Space(4);
+                    string statusDisplay = !string.IsNullOrEmpty(_aiStatusText) ? _aiStatusText : "AI is analyzing...";
+                    EditorGUILayout.LabelField(statusDisplay, EditorStyles.centeredGreyMiniLabel);
+                }
+                else if (!string.IsNullOrEmpty(aiResultCached))
+                {
+                    EditorGUILayout.Space(4);
+                    EditorGUILayout.BeginVertical(ShaderInspectorStyles.ChatBubbleAI);
+                    MarkdownRenderer.Render(aiResultCached);
+                    EditorGUILayout.EndVertical();
+                }
+
                 if (node.childIndices.Count > 0)
                 {
                     EditorGUILayout.Space(8);
@@ -424,6 +475,11 @@ namespace ShaderMCP.Editor
                             EditorGUILayout.LabelField(child.name, EditorStyles.miniLabel);
                             if (GUILayout.Button("Go", EditorStyles.miniButton, GUILayout.Width(28)))
                             {
+                                if (_aiAnalyzedNodeIndex != childIdx)
+                                {
+                                    _aiResult = "";
+                                    _aiStatusText = null;
+                                }
                                 _selectedNodeIndex = childIdx;
                                 _window.Repaint();
                             }
@@ -481,6 +537,10 @@ namespace ShaderMCP.Editor
             _graphNodes = null;
             _graphEdges = null;
             _treeRoot = null;
+            _aiResult = "";
+            _aiStatusText = null;
+            _isAIAnalyzing = false;
+            _aiAnalyzedNodeIndex = -1;
 
             if (string.IsNullOrEmpty(_shaderPath)) return;
 
@@ -635,6 +695,109 @@ namespace ShaderMCP.Editor
                 float zoomY = availHeight / contentHeight;
                 _zoom = Mathf.Clamp(Mathf.Min(zoomX, zoomY), MinZoom, 1.5f);
             }
+        }
+
+        #endregion
+
+        #region AI Analysis
+
+        private void RunAIAnalysis(GraphNode node, string analysisType)
+        {
+            _isAIAnalyzing = true;
+            _aiResult = "";
+            _aiStatusText = null;
+            _aiAnalyzedNodeIndex = _selectedNodeIndex;
+
+            string fileContext = GatherFileContext(node);
+            string prompt = BuildAIPrompt(analysisType, node);
+
+            AIRequestHandler.SendQuery(prompt, fileContext,
+                onChunk: chunk =>
+                {
+                    _aiResult += chunk;
+                    _window.Repaint();
+                },
+                onComplete: fullText =>
+                {
+                    _aiResult = fullText ?? "No response from AI.";
+                    _aiStatusText = null;
+                    _isAIAnalyzing = false;
+                    _window.Repaint();
+                },
+                onStatus: status =>
+                {
+                    _aiStatusText = status;
+                    _window.Repaint();
+                },
+                language: _window.SelectedLanguage
+            );
+        }
+
+        private string GatherFileContext(GraphNode node)
+        {
+            var parts = new List<string>();
+            parts.Add($"Root Shader: {_shaderName}");
+            parts.Add($"Root Path: {_shaderPath}");
+            parts.Add($"Selected File: {node.name}");
+            parts.Add($"Selected Path: {node.path}");
+            parts.Add($"Depth in include tree: {node.depth}");
+
+            // Parent info
+            if (!node.isRoot && _graphEdges != null)
+            {
+                foreach (var edge in _graphEdges)
+                {
+                    if (edge.toIndex == _selectedNodeIndex && edge.fromIndex < _graphNodes.Count)
+                    {
+                        parts.Add($"Included by: {_graphNodes[edge.fromIndex].name}");
+                        break;
+                    }
+                }
+            }
+
+            // Children info
+            if (node.childIndices.Count > 0)
+            {
+                var childNames = new List<string>();
+                foreach (int idx in node.childIndices)
+                {
+                    if (idx < _graphNodes.Count)
+                        childNames.Add(_graphNodes[idx].name);
+                }
+                parts.Add($"Includes: {string.Join(", ", childNames)}");
+            }
+
+            // File content (truncated to 4000 chars)
+            try
+            {
+                string fullPath = Path.GetFullPath(node.path);
+                if (File.Exists(fullPath))
+                {
+                    string content = File.ReadAllText(fullPath);
+                    if (content.Length > 4000)
+                        content = content.Substring(0, 4000) + "\n... (truncated)";
+                    parts.Add($"\n--- File Content ---\n{content}");
+                }
+            }
+            catch { }
+
+            return string.Join("\n", parts);
+        }
+
+        private string BuildAIPrompt(string analysisType, GraphNode node)
+        {
+            if (analysisType == "role")
+            {
+                return $"This file \"{node.name}\" is part of the shader \"{_shaderName}\"'s include hierarchy. " +
+                       $"Explain what role this file plays within the shader. " +
+                       $"What functionality does it provide and why is it included? " +
+                       $"Explain in a way that a non-developer (e.g., a technical artist) can understand.";
+            }
+
+            // "explain"
+            return $"Explain the shader include file \"{node.name}\" in a way that a non-developer can understand. " +
+                   $"What does this file do? What are its main features and functions? " +
+                   $"Keep the explanation clear and accessible.";
         }
 
         #endregion

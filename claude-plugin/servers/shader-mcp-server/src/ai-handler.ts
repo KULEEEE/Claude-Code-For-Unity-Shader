@@ -1,5 +1,6 @@
 import { query } from "@anthropic-ai/claude-agent-sdk";
 import { tmpdir } from "os";
+import { existsSync } from "fs";
 import { fileURLToPath } from "url";
 import { dirname, join } from "path";
 
@@ -7,6 +8,7 @@ interface AIRequest {
   prompt: string;
   shaderContext?: string;
   language?: string;
+  projectPath?: string;
   onChunk?: (chunk: string) => void;
   onStatus?: (status: string) => void;
 }
@@ -23,7 +25,12 @@ interface AIResponse {
  * Streams tokens in real-time via onChunk callback.
  */
 export async function handleAIQuery(request: AIRequest): Promise<AIResponse> {
-  const fullPrompt = buildFullPrompt(request.prompt, request.shaderContext, request.language);
+  const fullPrompt = buildFullPrompt(request.prompt, request.shaderContext, request.language, request.projectPath);
+
+  // Use Unity project path as cwd if available, fallback to tmpdir
+  const cwd = request.projectPath && existsSync(request.projectPath)
+    ? request.projectPath
+    : tmpdir();
 
   try {
     let resultText = "";
@@ -36,7 +43,7 @@ export async function handleAIQuery(request: AIRequest): Promise<AIResponse> {
     for await (const msg of query({
       prompt: fullPrompt,
       options: {
-        cwd: tmpdir(),
+        cwd,
         permissionMode: "bypassPermissions",
         allowDangerouslySkipPermissions: true,
         mcpServers: {
@@ -94,12 +101,19 @@ export async function handleAIQuery(request: AIRequest): Promise<AIResponse> {
 function buildFullPrompt(
   userPrompt: string,
   shaderContext?: string,
-  language?: string
+  language?: string,
+  projectPath?: string
 ): string {
   let prompt =
-    "You are a Unity shader expert assistant. " +
+    "You are a Unity shader expert assistant embedded in a Unity Editor plugin. " +
+    "You can read, create, modify, and delete shader files in the Unity project. " +
+    "Do NOT ask the user for file paths or project paths — the working directory is already set to the Unity project root. " +
     "Answer clearly and concisely. " +
-    "When suggesting code changes, provide specific code snippets.\n";
+    "When the user asks you to modify or create files, do it directly.\n";
+
+  if (projectPath) {
+    prompt += `Unity project path: ${projectPath}\n`;
+  }
 
   if (language) {
     prompt += `IMPORTANT: You MUST respond in ${language}.\n`;
