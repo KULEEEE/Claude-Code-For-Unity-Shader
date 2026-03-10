@@ -35,9 +35,15 @@ namespace ShaderMCP.Editor
         private const float NodeHeight = 44f;
         private const float HorizontalGap = 60f;
         private const float VerticalGap = 16f;
-        private const float InfoPanelWidth = 280f;
         private const float MinZoom = 0.3f;
         private const float MaxZoom = 2f;
+
+        // Resizable info panel
+        private float _infoPanelWidth = 280f;
+        private const float MinInfoPanelWidth = 180f;
+        private const float MaxInfoPanelWidth = 500f;
+        private const float SplitterHitWidth = 6f;
+        private bool _isDraggingSplitter;
 
         // Scroll for info panel
         private Vector2 _infoScrollPos;
@@ -98,14 +104,22 @@ namespace ShaderMCP.Editor
 
             GUILayoutUtility.GetRect(windowWidth, remainingHeight);
 
+            // Clamp info panel width
+            _infoPanelWidth = Mathf.Clamp(_infoPanelWidth, MinInfoPanelWidth, Mathf.Min(MaxInfoPanelWidth, windowWidth - 200));
+
             float splitterWidth = 2f;
-            float infoWidth = InfoPanelWidth;
-            float graphWidth = windowWidth - infoWidth - splitterWidth;
+            float graphWidth = windowWidth - _infoPanelWidth - splitterWidth;
             if (graphWidth < 100) graphWidth = 100;
 
             Rect graphRect = new Rect(0, topY, graphWidth, remainingHeight);
             Rect splitterRect = new Rect(graphRect.xMax, topY, splitterWidth, remainingHeight);
-            Rect infoRect = new Rect(splitterRect.xMax, topY, infoWidth, remainingHeight);
+            Rect infoRect = new Rect(splitterRect.xMax, topY, _infoPanelWidth, remainingHeight);
+
+            // Splitter drag handling
+            Rect splitterHitRect = new Rect(splitterRect.x - SplitterHitWidth * 0.5f, splitterRect.y,
+                SplitterHitWidth, splitterRect.height);
+            EditorGUIUtility.AddCursorRect(splitterHitRect, MouseCursor.ResizeHorizontal);
+            HandleSplitterDrag(splitterHitRect);
 
             DrawGraphArea(graphRect);
             EditorGUI.DrawRect(splitterRect, ShaderInspectorStyles.SplitterColor);
@@ -540,7 +554,7 @@ namespace ShaderMCP.Editor
             float contentHeight = maxY - minY + 80;
             _panOffset = new Vector2(-(minX + maxX) / 2f + 200, -(minY + maxY) / 2f + 200);
 
-            float availWidth = position.width - InfoPanelWidth - 40;
+            float availWidth = position.width - _infoPanelWidth - 40;
             float availHeight = position.height - 60;
             if (availWidth > 0 && availHeight > 0)
             {
@@ -605,6 +619,45 @@ namespace ShaderMCP.Editor
             catch { }
 
             return string.Join("\n", parts);
+        }
+
+        #endregion
+
+        #region Splitter
+
+        private void HandleSplitterDrag(Rect splitterHitRect)
+        {
+            Event e = Event.current;
+            switch (e.type)
+            {
+                case EventType.MouseDown:
+                    if (e.button == 0 && splitterHitRect.Contains(e.mousePosition))
+                    {
+                        _isDraggingSplitter = true;
+                        e.Use();
+                    }
+                    break;
+
+                case EventType.MouseDrag:
+                    if (_isDraggingSplitter)
+                    {
+                        // Splitter moves left = info panel grows, so subtract delta
+                        _infoPanelWidth -= e.delta.x;
+                        _infoPanelWidth = Mathf.Clamp(_infoPanelWidth, MinInfoPanelWidth,
+                            Mathf.Min(MaxInfoPanelWidth, position.width - 200));
+                        e.Use();
+                        Repaint();
+                    }
+                    break;
+
+                case EventType.MouseUp:
+                    if (_isDraggingSplitter)
+                    {
+                        _isDraggingSplitter = false;
+                        e.Use();
+                    }
+                    break;
+            }
         }
 
         #endregion
