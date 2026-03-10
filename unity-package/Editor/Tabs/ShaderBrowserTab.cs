@@ -202,6 +202,13 @@ namespace ShaderMCP.Editor
             EditorGUILayout.LabelField("  |  Supported: " + (shader.isSupported ? "Yes" : "No"));
             EditorGUILayout.EndHorizontal();
 
+            EditorGUILayout.Space(4);
+
+            if (GUILayout.Button("View Include Graph", GUILayout.Height(24)))
+            {
+                IncludeGraphWindow.Open(shader.path, shader.name, _window.SelectedLanguage);
+            }
+
             EditorGUILayout.Space(8);
 
             // Basic analysis buttons

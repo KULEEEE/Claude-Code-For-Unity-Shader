@@ -309,36 +309,4 @@ namespace ShaderMCP.Editor
             return node;
         }
     }
-
-    /// <summary>
-    /// Node in a dependency tree (Shader → Material → Texture).
-    /// </summary>
-    public class DependencyTreeNode
-    {
-        public string type; // "shader", "material", "texture"
-        public string name;
-        public string path;
-        public string propertyName; // for textures: which property slot (e.g., _MainTex)
-        public string textureSize;  // for textures: "1024x1024"
-        public int materialCount;   // for shaders: number of materials
-        public List<DependencyTreeNode> children = new List<DependencyTreeNode>();
-
-        public static DependencyTreeNode Parse(string json)
-        {
-            var node = new DependencyTreeNode();
-            node.type = JsonHelper.GetString(json, "type") ?? "unknown";
-            node.name = JsonHelper.GetString(json, "name") ?? "";
-            node.path = JsonHelper.GetString(json, "path") ?? "";
-            node.propertyName = JsonHelper.GetString(json, "propertyName") ?? "";
-            node.textureSize = JsonHelper.GetString(json, "textureSize") ?? "";
-            node.materialCount = JsonHelper.GetInt(json, "materialCount");
-
-            var childObjects = JsonHelper.GetArrayObjects(json, "children");
-            foreach (var childJson in childObjects)
-            {
-                node.children.Add(Parse(childJson));
-            }
-            return node;
-        }
-    }
 }

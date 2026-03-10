@@ -32,11 +32,6 @@ namespace ShaderMCP.Editor
         public static readonly Color GraphNodeText = new Color(0.9f, 0.9f, 0.9f);
         public static readonly Color GraphNodeSubText = new Color(0.6f, 0.6f, 0.7f);
 
-        // Dependency graph node type colors
-        public static readonly Color GraphNodeShader = new Color(0.18f, 0.32f, 0.48f);   // Blue (same as root)
-        public static readonly Color GraphNodeMaterial = new Color(0.20f, 0.38f, 0.25f);  // Green
-        public static readonly Color GraphNodeTexture = new Color(0.42f, 0.36f, 0.18f);   // Yellow/amber
-
         private static GUIStyle _tabNormal;
         private static GUIStyle _tabSelected;
         private static GUIStyle _headerLabel;

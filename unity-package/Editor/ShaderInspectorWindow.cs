@@ -4,20 +4,20 @@ using UnityEngine;
 namespace ShaderMCP.Editor
 {
     /// <summary>
-    /// Main Shader Inspector EditorWindow.
-    /// Provides tabbed interface for shader browsing, include graph, and AI chat.
+    /// Main Inspector EditorWindow.
+    /// Provides tabbed interface for shader browsing, material inspection, and AI chat.
     /// Menu: Tools > Shader MCP > Shader Inspector
     /// </summary>
     public class ShaderInspectorWindow : EditorWindow
     {
-        private enum Tab { Shaders, Graph, AIChat }
-        private static readonly string[] TabNames = { "Shaders", "Graph", "AI Chat" };
+        private enum Tab { Shaders, Materials, AIChat }
+        private static readonly string[] TabNames = { "Shaders", "Materials", "AI Chat" };
 
         private Tab _currentTab = Tab.Shaders;
 
         // Tab instances
         private ShaderBrowserTab _shaderTab;
-        private IncludeGraphTab _graphTab;
+        private MaterialListTab _materialTab;
         private AIChatTab _aiChatTab;
 
         // Shared state across tabs
@@ -43,7 +43,7 @@ namespace ShaderMCP.Editor
         private void OnEnable()
         {
             _shaderTab = new ShaderBrowserTab(this);
-            _graphTab = new IncludeGraphTab(this);
+            _materialTab = new MaterialListTab(this);
             _aiChatTab = new AIChatTab(this);
 
             RefreshPipelineInfo();
@@ -138,8 +138,8 @@ namespace ShaderMCP.Editor
                 case Tab.Shaders:
                     _shaderTab?.OnGUI();
                     break;
-                case Tab.Graph:
-                    _graphTab?.OnGUI();
+                case Tab.Materials:
+                    _materialTab?.OnGUI();
                     break;
                 case Tab.AIChat:
                     _aiChatTab?.OnGUI();
@@ -195,16 +195,10 @@ namespace ShaderMCP.Editor
                         _currentTab = Tab.Shaders;
                         _shaderTab?.SelectShader(path);
                     }
-                    else if (obj is Material mat)
+                    else if (obj is Material)
                     {
-                        // Navigate to the material's shader in Shaders tab
-                        _currentTab = Tab.Shaders;
-                        if (mat.shader != null)
-                        {
-                            string shaderPath = AssetDatabase.GetAssetPath(mat.shader);
-                            if (!string.IsNullOrEmpty(shaderPath))
-                                _shaderTab?.SelectShader(shaderPath);
-                        }
+                        _currentTab = Tab.Materials;
+                        _materialTab?.SelectMaterial(path);
                     }
                     Repaint();
                 }
@@ -243,12 +237,11 @@ namespace ShaderMCP.Editor
             Repaint();
         }
 
-        /// <summary>Notify the Graph tab when a shader is selected.</summary>
+        /// <summary>Notify when a shader is selected (for cross-tab updates).</summary>
         public void NotifyShaderSelected(string path, string name)
         {
             _selectedShaderPath = path;
             _selectedShaderName = name;
-            _graphTab?.SetShader(path, name);
         }
 
         public string SelectedShaderPath => _selectedShaderPath;
@@ -262,7 +255,7 @@ namespace ShaderMCP.Editor
         private void RefreshAll()
         {
             _shaderTab?.Refresh();
-            _graphTab?.Refresh();
+            _materialTab?.Refresh();
             RefreshPipelineInfo();
             CheckAIConnection();
         }
