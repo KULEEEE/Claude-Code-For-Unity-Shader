@@ -6,7 +6,7 @@ import { dirname, join } from "path";
 
 interface AIRequest {
   prompt: string;
-  shaderContext?: string;
+  context?: string;
   language?: string;
   projectPath?: string;
   onChunk?: (chunk: string) => void;
@@ -25,7 +25,7 @@ interface AIResponse {
  * Streams tokens in real-time via onChunk callback.
  */
 export async function handleAIQuery(request: AIRequest): Promise<AIResponse> {
-  const fullPrompt = buildFullPrompt(request.prompt, request.shaderContext, request.language, request.projectPath);
+  const fullPrompt = buildFullPrompt(request.prompt, request.context, request.language, request.projectPath);
 
   // Use Unity project path as cwd if available, fallback to tmpdir
   const cwd = request.projectPath && existsSync(request.projectPath)
@@ -100,13 +100,14 @@ export async function handleAIQuery(request: AIRequest): Promise<AIResponse> {
 
 function buildFullPrompt(
   userPrompt: string,
-  shaderContext?: string,
+  context?: string,
   language?: string,
   projectPath?: string
 ): string {
   let prompt =
-    "You are a Unity shader expert assistant embedded in a Unity Editor plugin. " +
-    "You can read, create, modify, and delete shader files in the Unity project. " +
+    "You are a Unity development expert assistant embedded in a Unity Editor plugin. " +
+    "You can read, create, modify, and delete files in the Unity project. " +
+    "You have expertise in shaders (HLSL/ShaderLab), C# scripts, materials, textures, and all Unity workflows. " +
     "Do NOT ask the user for file paths or project paths — the working directory is already set to the Unity project root. " +
     "Answer clearly and concisely. " +
     "When the user asks you to modify or create files, do it directly.\n";
@@ -123,8 +124,8 @@ function buildFullPrompt(
 
   prompt += "\n";
 
-  if (shaderContext) {
-    prompt += `Shader Context:\n${shaderContext}\n\n`;
+  if (context) {
+    prompt += `Context:\n${context}\n\n`;
   }
 
   prompt += `User Question:\n${userPrompt}`;

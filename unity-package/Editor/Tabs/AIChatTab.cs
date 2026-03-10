@@ -6,8 +6,8 @@ using UnityEngine;
 namespace ShaderMCP.Editor
 {
     /// <summary>
-    /// AI Chat tab: free-form chat with Claude about shaders.
-    /// Supports context attachment, quick presets, and conversation history.
+    /// AI Chat tab: free-form chat with Claude about the Unity project.
+    /// Supports optional context attachment and conversation history.
     /// </summary>
     public class AIChatTab
     {
@@ -22,22 +22,22 @@ namespace ShaderMCP.Editor
         private ChatMessage _streamingMessage;
         private string _statusText;
 
-        // Context
-        private string _contextShaderPath;
-        private string _contextShaderName;
-        private string _contextShaderCode;
+        // Context (generic — can be any asset)
+        private string _contextAssetPath;
+        private string _contextAssetName;
+        private string _contextContent;
 
 
         // Quick presets
         private bool _showQuickMenu;
         private static readonly string[] QuickPresets =
         {
-            "Optimize this shader",
-            "Explain errors and how to fix them",
-            "Explain this shader for non-programmers",
-            "How to reduce variant count",
+            "Explain this code",
+            "Find potential issues",
+            "Suggest optimizations",
+            "How does this work?",
             "Check for best practice violations",
-            "Suggest performance improvements"
+            "Suggest improvements"
         };
 
         private class ChatMessage
@@ -50,7 +50,7 @@ namespace ShaderMCP.Editor
         public AIChatTab(ShaderInspectorWindow window)
         {
             _window = window;
-            AddSystemMessage("Hello! Ask me anything about shaders. Select a shader in the Shaders tab to automatically attach it as context.");
+            AddSystemMessage("Hello! Ask me anything about your Unity project.");
         }
 
         public void OnGUI()
@@ -71,11 +71,11 @@ namespace ShaderMCP.Editor
         {
             EditorGUILayout.BeginHorizontal(EditorStyles.toolbar);
 
-            if (!string.IsNullOrEmpty(_contextShaderName))
+            if (!string.IsNullOrEmpty(_contextAssetName))
             {
                 var oldColor = GUI.color;
                 GUI.color = ShaderInspectorStyles.CyanStatus;
-                EditorGUILayout.LabelField($"Context: {_contextShaderName}", GUILayout.ExpandWidth(true));
+                EditorGUILayout.LabelField($"Context: {_contextAssetName}", GUILayout.ExpandWidth(true));
                 GUI.color = oldColor;
 
                 if (GUILayout.Button("X", EditorStyles.toolbarButton, GUILayout.Width(22)))
@@ -85,7 +85,7 @@ namespace ShaderMCP.Editor
             }
             else
             {
-                EditorGUILayout.LabelField("No shader context (select a shader in Shaders tab)",
+                EditorGUILayout.LabelField("No context attached",
                     EditorStyles.miniLabel);
             }
 
@@ -94,7 +94,7 @@ namespace ShaderMCP.Editor
             if (GUILayout.Button("Clear Chat", EditorStyles.toolbarButton, GUILayout.Width(70)))
             {
                 _messages.Clear();
-                AddSystemMessage("Chat cleared. Ask me anything about shaders.");
+                AddSystemMessage("Chat cleared.");
             }
 
             EditorGUILayout.EndHorizontal();
@@ -240,12 +240,12 @@ namespace ShaderMCP.Editor
             _scrollToBottom = true;
 
             // Build context
-            string shaderContext = null;
-            if (!string.IsNullOrEmpty(_contextShaderPath))
+            string context = null;
+            if (!string.IsNullOrEmpty(_contextAssetPath))
             {
-                shaderContext = _contextShaderCode;
-                if (string.IsNullOrEmpty(shaderContext))
-                    shaderContext = LoadShaderContext();
+                context = _contextContent;
+                if (string.IsNullOrEmpty(context))
+                    context = LoadAssetContext();
             }
 
             // Build conversation history for multi-turn
@@ -263,7 +263,7 @@ namespace ShaderMCP.Editor
             _streamingMessage = null;
             _statusText = null;
 
-            AIRequestHandler.SendQuery(fullPrompt, shaderContext,
+            AIRequestHandler.SendQuery(fullPrompt, context,
                 onChunk: chunk =>
                 {
                     if (_streamingMessage == null)
@@ -324,37 +324,36 @@ namespace ShaderMCP.Editor
             });
         }
 
-        private string LoadShaderContext()
+        private string LoadAssetContext()
         {
             try
             {
-                if (string.IsNullOrEmpty(_contextShaderPath)) return null;
+                if (string.IsNullOrEmpty(_contextAssetPath)) return null;
 
                 var parts = new List<string>();
-                parts.Add($"Shader: {_contextShaderName}");
-                parts.Add($"Path: {_contextShaderPath}");
+                parts.Add($"Asset: {_contextAssetName}");
+                parts.Add($"Path: {_contextAssetPath}");
 
-                string codeJson = ShaderAnalyzer.GetShaderCode(_contextShaderPath);
-                var codeData = ShaderCodeData.Parse(codeJson);
-                if (!string.IsNullOrEmpty(codeData.code))
+                // Try to load shader-specific context
+                if (_contextAssetPath.EndsWith(".shader") || _contextAssetPath.EndsWith(".cginc") ||
+                    _contextAssetPath.EndsWith(".hlsl") || _contextAssetPath.EndsWith(".compute"))
                 {
-                    string code = codeData.code;
-                    if (code.Length > 4000) code = code.Substring(0, 4000) + "\n... (truncated)";
-                    parts.Add("\nShader Code:\n" + code);
+                    string codeJson = ShaderAnalyzer.GetShaderCode(_contextAssetPath);
+                    var codeData = ShaderCodeData.Parse(codeJson);
+                    if (!string.IsNullOrEmpty(codeData.code))
+                    {
+                        string code = codeData.code;
+                        if (code.Length > 4000) code = code.Substring(0, 4000) + "\n... (truncated)";
+                        parts.Add("\nCode:\n" + code);
+                    }
                 }
 
-                string variantJson = ShaderAnalyzer.GetVariantInfo(_contextShaderPath);
-                var variant = VariantInfo.Parse(variantJson);
-                parts.Add($"\nVariants: {variant.totalVariantCount}, Passes: {variant.passCount}");
-                if (variant.globalKeywords.Count > 0)
-                    parts.Add("Global Keywords: " + string.Join(", ", variant.globalKeywords));
-
-                _contextShaderCode = string.Join("\n", parts);
-                return _contextShaderCode;
+                _contextContent = string.Join("\n", parts);
+                return _contextContent;
             }
             catch
             {
-                return $"Shader: {_contextShaderName}\nPath: {_contextShaderPath}";
+                return $"Asset: {_contextAssetName}\nPath: {_contextAssetPath}";
             }
         }
 
@@ -362,24 +361,24 @@ namespace ShaderMCP.Editor
 
         #region Public API
 
-        public void SetContext(string shaderPath, string shaderName)
+        public void SetContext(string assetPath, string assetName)
         {
-            _contextShaderPath = shaderPath;
-            _contextShaderName = shaderName;
-            _contextShaderCode = null; // Will be loaded lazily
+            _contextAssetPath = assetPath;
+            _contextAssetName = assetName;
+            _contextContent = null; // Will be loaded lazily
         }
 
         public void ClearContext()
         {
-            _contextShaderPath = null;
-            _contextShaderName = null;
-            _contextShaderCode = null;
+            _contextAssetPath = null;
+            _contextAssetName = null;
+            _contextContent = null;
         }
 
-        public void AskQuestion(string prompt, string shaderContext = null)
+        public void AskQuestion(string prompt, string context = null)
         {
-            if (!string.IsNullOrEmpty(shaderContext))
-                _contextShaderCode = shaderContext;
+            if (!string.IsNullOrEmpty(context))
+                _contextContent = context;
 
             _inputText = prompt;
             SendMessage();

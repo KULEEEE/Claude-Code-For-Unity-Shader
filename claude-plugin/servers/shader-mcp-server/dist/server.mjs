@@ -31182,7 +31182,7 @@ import { existsSync } from "fs";
 import { fileURLToPath } from "url";
 import { dirname, join } from "path";
 async function handleAIQuery(request) {
-  const fullPrompt = buildFullPrompt(request.prompt, request.shaderContext, request.language, request.projectPath);
+  const fullPrompt = buildFullPrompt(request.prompt, request.context, request.language, request.projectPath);
   const cwd = request.projectPath && existsSync(request.projectPath) ? request.projectPath : tmpdir();
   try {
     let resultText = "";
@@ -31236,8 +31236,8 @@ async function handleAIQuery(request) {
     return { success: false, error: msg };
   }
 }
-function buildFullPrompt(userPrompt, shaderContext, language, projectPath) {
-  let prompt = "You are a Unity shader expert assistant embedded in a Unity Editor plugin. You can read, create, modify, and delete shader files in the Unity project. Do NOT ask the user for file paths or project paths \u2014 the working directory is already set to the Unity project root. Answer clearly and concisely. When the user asks you to modify or create files, do it directly.\n";
+function buildFullPrompt(userPrompt, context, language, projectPath) {
+  let prompt = "You are a Unity development expert assistant embedded in a Unity Editor plugin. You can read, create, modify, and delete files in the Unity project. You have expertise in shaders (HLSL/ShaderLab), C# scripts, materials, textures, and all Unity workflows. Do NOT ask the user for file paths or project paths \u2014 the working directory is already set to the Unity project root. Answer clearly and concisely. When the user asks you to modify or create files, do it directly.\n";
   if (projectPath) {
     prompt += `Unity project path: ${projectPath}
 `;
@@ -31249,9 +31249,9 @@ function buildFullPrompt(userPrompt, shaderContext, language, projectPath) {
     prompt += "Use the user's language when possible.\n";
   }
   prompt += "\n";
-  if (shaderContext) {
-    prompt += `Shader Context:
-${shaderContext}
+  if (context) {
+    prompt += `Context:
+${context}
 
 `;
   }
@@ -31788,7 +31788,7 @@ function registerEditorPlatformResource(server, bridge) {
 async function main() {
   const server = new McpServer({
     name: "unity-shader-tools",
-    version: "0.2.6"
+    version: "0.4.0"
   });
   const bridge = new UnityBridge("ws://localhost:8090");
   const lspClient = new ShaderLspClient();
@@ -31818,7 +31818,7 @@ async function main() {
     try {
       const result = await handleAIQuery({
         prompt: params.prompt,
-        shaderContext: params.shaderContext,
+        context: params.context ?? params.shaderContext,
         language: params.language,
         projectPath: params.projectPath,
         onChunk: (chunk) => {

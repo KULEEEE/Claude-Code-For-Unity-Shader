@@ -7,19 +7,26 @@ using UnityEngine;
 namespace ShaderMCP.Editor
 {
     /// <summary>
-    /// Graph tab: node-based include tree visualization with pan/zoom.
-    /// Shows shader #include hierarchy as an interactive node graph.
+    /// Graph tab: node-based visualization with pan/zoom.
+    /// Supports two modes:
+    /// - Include Graph: shader #include hierarchy
+    /// - Dependency Graph: Shader → Material → Texture dependencies
     /// </summary>
     public class IncludeGraphTab
     {
         private readonly ShaderInspectorWindow _window;
+
+        // Graph mode
+        private enum GraphMode { Include, Dependency }
+        private GraphMode _graphMode = GraphMode.Include;
 
         // Current shader context
         private string _shaderPath;
         private string _shaderName;
 
         // Tree data
-        private IncludeTreeNode _treeRoot;
+        private IncludeTreeNode _includeTreeRoot;
+        private DependencyTreeNode _dependencyTreeRoot;
 
         // Graph nodes (layout computed)
         private List<GraphNode> _graphNodes;
@@ -59,6 +66,10 @@ namespace ShaderMCP.Editor
             public bool isRoot;
             public int depth;
             public List<int> childIndices = new List<int>();
+
+            // Extended fields for dependency graph
+            public string nodeType; // "include", "shader", "material", "texture"
+            public string extraInfo; // e.g., texture size, property name
         }
 
         private class GraphEdge
@@ -76,9 +87,15 @@ namespace ShaderMCP.Editor
         {
             DrawToolbar();
 
-            if (_treeRoot == null)
+            bool hasData = (_graphMode == GraphMode.Include && _includeTreeRoot != null) ||
+                           (_graphMode == GraphMode.Dependency && _dependencyTreeRoot != null);
+
+            if (!hasData)
             {
-                EditorGUILayout.LabelField("Select a shader in the Shaders tab to view its include graph.",
+                string hint = _graphMode == GraphMode.Include
+                    ? "Select a shader in the Shaders tab to view its include graph."
+                    : "Select a shader in the Shaders tab to view its dependency graph.";
+                EditorGUILayout.LabelField(hint,
                     EditorStyles.centeredGreyMiniLabel, GUILayout.ExpandHeight(true));
                 return;
             }
@@ -120,7 +137,29 @@ namespace ShaderMCP.Editor
             EditorGUILayout.BeginHorizontal(EditorStyles.toolbar);
 
             string label = string.IsNullOrEmpty(_shaderName) ? "No shader selected" : _shaderName;
-            GUILayout.Label(label, EditorStyles.boldLabel, GUILayout.MaxWidth(300));
+            GUILayout.Label(label, EditorStyles.boldLabel, GUILayout.MaxWidth(200));
+
+            GUILayout.Space(8);
+
+            // Mode toggle
+            EditorGUI.BeginChangeCheck();
+            bool isIncludeMode = GUILayout.Toggle(_graphMode == GraphMode.Include, "Include",
+                EditorStyles.toolbarButton, GUILayout.Width(60));
+            if (EditorGUI.EndChangeCheck() && isIncludeMode && _graphMode != GraphMode.Include)
+            {
+                _graphMode = GraphMode.Include;
+                RebuildGraph();
+            }
+
+            EditorGUI.BeginChangeCheck();
+            bool isDependencyMode = GUILayout.Toggle(_graphMode == GraphMode.Dependency, "Dependency",
+                EditorStyles.toolbarButton, GUILayout.Width(75));
+            if (EditorGUI.EndChangeCheck() && isDependencyMode && _graphMode != GraphMode.Dependency)
+            {
+                _graphMode = GraphMode.Dependency;
+                RebuildGraph();
+            }
+
             GUILayout.FlexibleSpace();
 
             if (GUILayout.Button("Rebuild", EditorStyles.toolbarButton, GUILayout.Width(60)))
@@ -158,9 +197,10 @@ namespace ShaderMCP.Editor
                 DrawEdges(graphRect);
                 DrawNodes(graphRect);
 
-                // Zoom indicator
-                GUI.Label(new Rect(6, graphRect.height - 20, 80, 18),
-                    $"Zoom: {_zoom:F1}x", EditorStyles.miniLabel);
+                // Mode + zoom indicator
+                string modeLabel = _graphMode == GraphMode.Include ? "Include" : "Dependency";
+                GUI.Label(new Rect(6, graphRect.height - 20, 160, 18),
+                    $"{modeLabel} | Zoom: {_zoom:F1}x", EditorStyles.miniLabel);
             }
             GUI.EndClip();
         }
@@ -305,10 +345,12 @@ namespace ShaderMCP.Editor
 
                 bool isSelected = i == _selectedNodeIndex;
 
-                // Node background
-                Color bgColor = node.isRoot ? ShaderInspectorStyles.GraphNodeRoot :
-                    isSelected ? ShaderInspectorStyles.GraphNodeSelected :
-                    ShaderInspectorStyles.GraphNodeNormal;
+                // Node background color based on type
+                Color bgColor;
+                if (isSelected)
+                    bgColor = ShaderInspectorStyles.GraphNodeSelected;
+                else
+                    bgColor = GetNodeColor(node);
 
                 EditorGUI.DrawRect(r, bgColor);
 
@@ -322,11 +364,36 @@ namespace ShaderMCP.Editor
                 GUI.color = ShaderInspectorStyles.GraphNodeText;
                 GUI.Label(nameRect, TruncateString(node.name, 22), EditorStyles.boldLabel);
 
-                // Sub text: line count
+                // Sub text
                 var subRect = new Rect(r.x + 6, r.y + 22 * _zoom, r.width - 12, 16 * _zoom);
                 GUI.color = ShaderInspectorStyles.GraphNodeSubText;
-                GUI.Label(subRect, $"{node.lineCount} lines", EditorStyles.miniLabel);
+                string subText = GetNodeSubText(node);
+                GUI.Label(subRect, subText, EditorStyles.miniLabel);
                 GUI.color = oldColor;
+            }
+        }
+
+        private Color GetNodeColor(GraphNode node)
+        {
+            switch (node.nodeType)
+            {
+                case "shader": return ShaderInspectorStyles.GraphNodeShader;
+                case "material": return ShaderInspectorStyles.GraphNodeMaterial;
+                case "texture": return ShaderInspectorStyles.GraphNodeTexture;
+                default:
+                    return node.isRoot ? ShaderInspectorStyles.GraphNodeRoot : ShaderInspectorStyles.GraphNodeNormal;
+            }
+        }
+
+        private string GetNodeSubText(GraphNode node)
+        {
+            switch (node.nodeType)
+            {
+                case "shader": return $"{node.extraInfo}";
+                case "material": return "Material";
+                case "texture": return node.extraInfo ?? "Texture";
+                default:
+                    return $"{node.lineCount} lines";
             }
         }
 
@@ -402,91 +469,10 @@ namespace ShaderMCP.Editor
             {
                 var node = _graphNodes[_selectedNodeIndex];
 
-                EditorGUILayout.LabelField("Name:", EditorStyles.miniLabel);
-                EditorGUILayout.LabelField(node.name, EditorStyles.boldLabel);
-                EditorGUILayout.Space(2);
-
-                EditorGUILayout.LabelField("Path:", EditorStyles.miniLabel);
-                EditorGUILayout.LabelField(node.path, EditorStyles.wordWrappedMiniLabel);
-                EditorGUILayout.Space(2);
-
-                EditorGUILayout.LabelField($"Lines: {node.lineCount}");
-                EditorGUILayout.LabelField($"Depth: {node.depth}");
-                EditorGUILayout.LabelField($"Children: {node.childIndices.Count}");
-                EditorGUILayout.Space(8);
-
-                if (GUILayout.Button("Open in Editor", GUILayout.Height(24)))
-                {
-                    OpenFileInEditor(node.path);
-                }
-
-                if (GUILayout.Button("Ping in Project", GUILayout.Height(24)))
-                {
-                    var asset = AssetDatabase.LoadMainAssetAtPath(node.path);
-                    if (asset != null) EditorGUIUtility.PingObject(asset);
-                }
-
-                // AI section
-                EditorGUILayout.Space(8);
-                EditorGUILayout.LabelField("AI", ShaderInspectorStyles.SectionHeader);
-
-                EditorGUI.BeginDisabledGroup(_isAIAnalyzing || !_window.IsAIConnected);
-                EditorGUILayout.BeginHorizontal();
-                if (GUILayout.Button("Explain File", GUILayout.Height(24)))
-                    RunAIAnalysis(node, "explain");
-                if (GUILayout.Button("Role in Shader", GUILayout.Height(24)))
-                    RunAIAnalysis(node, "role");
-                EditorGUILayout.EndHorizontal();
-                EditorGUI.EndDisabledGroup();
-
-                if (!_window.IsAIConnected)
-                {
-                    EditorGUILayout.HelpBox("AI not available. Ensure MCP server is connected.", MessageType.Info);
-                }
-
-                // AI result display
-                bool showAIWaiting = _isAIAnalyzing && string.IsNullOrEmpty(_aiResult);
-                string aiResultCached = _aiResult;
-
-                if (showAIWaiting)
-                {
-                    EditorGUILayout.Space(4);
-                    string statusDisplay = !string.IsNullOrEmpty(_aiStatusText) ? _aiStatusText : "AI is analyzing...";
-                    EditorGUILayout.LabelField(statusDisplay, EditorStyles.centeredGreyMiniLabel);
-                }
-                else if (!string.IsNullOrEmpty(aiResultCached))
-                {
-                    EditorGUILayout.Space(4);
-                    EditorGUILayout.BeginVertical(ShaderInspectorStyles.ChatBubbleAI);
-                    MarkdownRenderer.Render(aiResultCached);
-                    EditorGUILayout.EndVertical();
-                }
-
-                if (node.childIndices.Count > 0)
-                {
-                    EditorGUILayout.Space(8);
-                    EditorGUILayout.LabelField("Includes:", ShaderInspectorStyles.SectionHeader);
-                    foreach (int childIdx in node.childIndices)
-                    {
-                        if (childIdx < _graphNodes.Count)
-                        {
-                            var child = _graphNodes[childIdx];
-                            EditorGUILayout.BeginHorizontal();
-                            EditorGUILayout.LabelField(child.name, EditorStyles.miniLabel);
-                            if (GUILayout.Button("Go", EditorStyles.miniButton, GUILayout.Width(28)))
-                            {
-                                if (_aiAnalyzedNodeIndex != childIdx)
-                                {
-                                    _aiResult = "";
-                                    _aiStatusText = null;
-                                }
-                                _selectedNodeIndex = childIdx;
-                                _window.Repaint();
-                            }
-                            EditorGUILayout.EndHorizontal();
-                        }
-                    }
-                }
+                if (_graphMode == GraphMode.Dependency)
+                    DrawDependencyNodeInfo(node);
+                else
+                    DrawIncludeNodeInfo(node);
             }
             else
             {
@@ -513,6 +499,211 @@ namespace ShaderMCP.Editor
             GUILayout.EndArea();
         }
 
+        private void DrawIncludeNodeInfo(GraphNode node)
+        {
+            EditorGUILayout.LabelField("Name:", EditorStyles.miniLabel);
+            EditorGUILayout.LabelField(node.name, EditorStyles.boldLabel);
+            EditorGUILayout.Space(2);
+
+            EditorGUILayout.LabelField("Path:", EditorStyles.miniLabel);
+            EditorGUILayout.LabelField(node.path, EditorStyles.wordWrappedMiniLabel);
+            EditorGUILayout.Space(2);
+
+            EditorGUILayout.LabelField($"Lines: {node.lineCount}");
+            EditorGUILayout.LabelField($"Depth: {node.depth}");
+            EditorGUILayout.LabelField($"Children: {node.childIndices.Count}");
+            EditorGUILayout.Space(8);
+
+            if (GUILayout.Button("Open in Editor", GUILayout.Height(24)))
+            {
+                OpenFileInEditor(node.path);
+            }
+
+            if (GUILayout.Button("Ping in Project", GUILayout.Height(24)))
+            {
+                var asset = AssetDatabase.LoadMainAssetAtPath(node.path);
+                if (asset != null) EditorGUIUtility.PingObject(asset);
+            }
+
+            // AI section
+            EditorGUILayout.Space(8);
+            EditorGUILayout.LabelField("AI", ShaderInspectorStyles.SectionHeader);
+
+            EditorGUI.BeginDisabledGroup(_isAIAnalyzing || !_window.IsAIConnected);
+            EditorGUILayout.BeginHorizontal();
+            if (GUILayout.Button("Explain File", GUILayout.Height(24)))
+                RunAIAnalysis(node, "explain");
+            if (GUILayout.Button("Role in Shader", GUILayout.Height(24)))
+                RunAIAnalysis(node, "role");
+            EditorGUILayout.EndHorizontal();
+            EditorGUI.EndDisabledGroup();
+
+            if (!_window.IsAIConnected)
+            {
+                EditorGUILayout.HelpBox("AI not available. Ensure MCP server is connected.", MessageType.Info);
+            }
+
+            DrawAIResult();
+
+            if (node.childIndices.Count > 0)
+            {
+                EditorGUILayout.Space(8);
+                EditorGUILayout.LabelField("Includes:", ShaderInspectorStyles.SectionHeader);
+                DrawChildNodeList(node);
+            }
+        }
+
+        private void DrawDependencyNodeInfo(GraphNode node)
+        {
+            // Type badge
+            string typeLabel = node.nodeType == "shader" ? "Shader" :
+                               node.nodeType == "material" ? "Material" :
+                               node.nodeType == "texture" ? "Texture" : "Unknown";
+
+            var oldColor = GUI.color;
+            GUI.color = GetNodeColor(node);
+            EditorGUILayout.LabelField(typeLabel, EditorStyles.miniBoldLabel);
+            GUI.color = oldColor;
+
+            EditorGUILayout.LabelField("Name:", EditorStyles.miniLabel);
+            EditorGUILayout.LabelField(node.name, EditorStyles.boldLabel);
+            EditorGUILayout.Space(2);
+
+            EditorGUILayout.LabelField("Path:", EditorStyles.miniLabel);
+            EditorGUILayout.LabelField(node.path, EditorStyles.wordWrappedMiniLabel);
+            EditorGUILayout.Space(2);
+
+            // Type-specific info
+            if (node.nodeType == "texture")
+            {
+                if (!string.IsNullOrEmpty(node.extraInfo))
+                    EditorGUILayout.LabelField($"Size: {node.extraInfo}");
+
+                // Show texture preview
+                var tex = AssetDatabase.LoadAssetAtPath<Texture>(node.path);
+                if (tex != null)
+                {
+                    EditorGUILayout.Space(4);
+                    Rect previewRect = GUILayoutUtility.GetRect(InfoPanelWidth - 20, 120);
+                    EditorGUI.DrawPreviewTexture(previewRect, tex, null, ScaleMode.ScaleToFit);
+                }
+            }
+            else if (node.nodeType == "material")
+            {
+                EditorGUILayout.LabelField($"Textures: {node.childIndices.Count}");
+            }
+            else if (node.nodeType == "shader")
+            {
+                EditorGUILayout.LabelField($"Materials: {node.childIndices.Count}");
+            }
+
+            EditorGUILayout.Space(8);
+
+            // Action buttons
+            if (GUILayout.Button("Ping in Project", GUILayout.Height(24)))
+            {
+                var asset = AssetDatabase.LoadMainAssetAtPath(node.path);
+                if (asset != null) EditorGUIUtility.PingObject(asset);
+            }
+
+            if (node.nodeType == "shader")
+            {
+                if (GUILayout.Button("Open in Editor", GUILayout.Height(24)))
+                    OpenFileInEditor(node.path);
+            }
+            else if (node.nodeType == "material")
+            {
+                if (GUILayout.Button("Select Material", GUILayout.Height(24)))
+                {
+                    var mat = AssetDatabase.LoadAssetAtPath<Material>(node.path);
+                    if (mat != null) Selection.activeObject = mat;
+                }
+            }
+            else if (node.nodeType == "texture")
+            {
+                if (GUILayout.Button("Select Texture", GUILayout.Height(24)))
+                {
+                    var tex = AssetDatabase.LoadAssetAtPath<Texture>(node.path);
+                    if (tex != null) Selection.activeObject = tex;
+                }
+            }
+
+            // Children list
+            if (node.childIndices.Count > 0)
+            {
+                EditorGUILayout.Space(8);
+                string childLabel = node.nodeType == "shader" ? "Materials:" :
+                                    node.nodeType == "material" ? "Textures:" : "Children:";
+                EditorGUILayout.LabelField(childLabel, ShaderInspectorStyles.SectionHeader);
+                DrawChildNodeList(node);
+            }
+
+            // Find parent for textures (show which property slot)
+            if (node.nodeType == "texture" && _graphEdges != null)
+            {
+                foreach (var edge in _graphEdges)
+                {
+                    if (edge.toIndex == _selectedNodeIndex && edge.fromIndex < _graphNodes.Count)
+                    {
+                        EditorGUILayout.Space(4);
+                        EditorGUILayout.LabelField($"Used by: {_graphNodes[edge.fromIndex].name}",
+                            EditorStyles.miniLabel);
+                        break;
+                    }
+                }
+            }
+        }
+
+        private void DrawChildNodeList(GraphNode node)
+        {
+            foreach (int childIdx in node.childIndices)
+            {
+                if (childIdx < _graphNodes.Count)
+                {
+                    var child = _graphNodes[childIdx];
+                    EditorGUILayout.BeginHorizontal();
+
+                    // For texture nodes in dependency mode, show property name
+                    string displayName = child.nodeType == "texture" && !string.IsNullOrEmpty(child.extraInfo)
+                        ? $"{child.name} ({child.extraInfo})"
+                        : child.name;
+
+                    EditorGUILayout.LabelField(displayName, EditorStyles.miniLabel);
+                    if (GUILayout.Button("Go", EditorStyles.miniButton, GUILayout.Width(28)))
+                    {
+                        if (_aiAnalyzedNodeIndex != childIdx)
+                        {
+                            _aiResult = "";
+                            _aiStatusText = null;
+                        }
+                        _selectedNodeIndex = childIdx;
+                        _window.Repaint();
+                    }
+                    EditorGUILayout.EndHorizontal();
+                }
+            }
+        }
+
+        private void DrawAIResult()
+        {
+            bool showAIWaiting = _isAIAnalyzing && string.IsNullOrEmpty(_aiResult);
+            string aiResultCached = _aiResult;
+
+            if (showAIWaiting)
+            {
+                EditorGUILayout.Space(4);
+                string statusDisplay = !string.IsNullOrEmpty(_aiStatusText) ? _aiStatusText : "AI is analyzing...";
+                EditorGUILayout.LabelField(statusDisplay, EditorStyles.centeredGreyMiniLabel);
+            }
+            else if (!string.IsNullOrEmpty(aiResultCached))
+            {
+                EditorGUILayout.Space(4);
+                EditorGUILayout.BeginVertical(ShaderInspectorStyles.ChatBubbleAI);
+                MarkdownRenderer.Render(aiResultCached);
+                EditorGUILayout.EndVertical();
+            }
+        }
+
         #endregion
 
         #region Build Graph
@@ -536,7 +727,8 @@ namespace ShaderMCP.Editor
             _selectedNodeIndex = -1;
             _graphNodes = null;
             _graphEdges = null;
-            _treeRoot = null;
+            _includeTreeRoot = null;
+            _dependencyTreeRoot = null;
             _aiResult = "";
             _aiStatusText = null;
             _isAIAnalyzing = false;
@@ -546,36 +738,54 @@ namespace ShaderMCP.Editor
 
             try
             {
-                string json = ShaderAnalyzer.GetIncludeTree(_shaderPath);
-                if (JsonHelper.GetString(json, "error") != null)
-                {
-                    Debug.LogWarning($"[ShaderInspector] Include tree error: {JsonHelper.GetString(json, "error")}");
-                    return;
-                }
+                if (_graphMode == GraphMode.Include)
+                    BuildIncludeGraph();
+                else
+                    BuildDependencyGraph();
 
-                _treeRoot = IncludeTreeNode.Parse(json);
-                BuildGraphFromTree();
                 FitAll();
             }
             catch (Exception ex)
             {
-                Debug.LogError($"[ShaderInspector] Failed to build include graph: {ex.Message}");
+                Debug.LogError($"[ShaderInspector] Failed to build graph: {ex.Message}");
             }
         }
 
-        private void BuildGraphFromTree()
+        private void BuildIncludeGraph()
         {
+            string json = ShaderAnalyzer.GetIncludeTree(_shaderPath);
+            if (JsonHelper.GetString(json, "error") != null)
+            {
+                Debug.LogWarning($"[ShaderInspector] Include tree error: {JsonHelper.GetString(json, "error")}");
+                return;
+            }
+
+            _includeTreeRoot = IncludeTreeNode.Parse(json);
+
             _graphNodes = new List<GraphNode>();
             _graphEdges = new List<GraphEdge>();
-
-            if (_treeRoot == null) return;
-
-            // Flatten tree to nodes, compute layout
-            FlattenTree(_treeRoot, 0, -1);
+            FlattenIncludeTree(_includeTreeRoot, 0, -1);
             ComputeLayout();
         }
 
-        private int FlattenTree(IncludeTreeNode treeNode, int depth, int parentIndex)
+        private void BuildDependencyGraph()
+        {
+            string json = MaterialInspector.GetDependencyTree(_shaderPath);
+            if (JsonHelper.GetString(json, "error") != null)
+            {
+                Debug.LogWarning($"[ShaderInspector] Dependency tree error: {JsonHelper.GetString(json, "error")}");
+                return;
+            }
+
+            _dependencyTreeRoot = DependencyTreeNode.Parse(json);
+
+            _graphNodes = new List<GraphNode>();
+            _graphEdges = new List<GraphEdge>();
+            FlattenDependencyTree(_dependencyTreeRoot, 0, -1);
+            ComputeLayout();
+        }
+
+        private int FlattenIncludeTree(IncludeTreeNode treeNode, int depth, int parentIndex)
         {
             int index = _graphNodes.Count;
             var gNode = new GraphNode
@@ -584,7 +794,8 @@ namespace ShaderMCP.Editor
                 path = treeNode.path,
                 lineCount = treeNode.lineCount,
                 isRoot = (depth == 0),
-                depth = depth
+                depth = depth,
+                nodeType = "include"
             };
             _graphNodes.Add(gNode);
 
@@ -596,7 +807,45 @@ namespace ShaderMCP.Editor
 
             foreach (var child in treeNode.children)
             {
-                FlattenTree(child, depth + 1, index);
+                FlattenIncludeTree(child, depth + 1, index);
+            }
+
+            return index;
+        }
+
+        private int FlattenDependencyTree(DependencyTreeNode treeNode, int depth, int parentIndex)
+        {
+            int index = _graphNodes.Count;
+
+            string extra = "";
+            if (treeNode.type == "shader")
+                extra = $"{treeNode.materialCount} materials";
+            else if (treeNode.type == "texture")
+                extra = treeNode.textureSize;
+
+            var gNode = new GraphNode
+            {
+                name = treeNode.type == "texture" && !string.IsNullOrEmpty(treeNode.propertyName)
+                    ? $"{treeNode.name}" : treeNode.name,
+                path = treeNode.path,
+                isRoot = (depth == 0),
+                depth = depth,
+                nodeType = treeNode.type,
+                extraInfo = treeNode.type == "texture"
+                    ? treeNode.textureSize
+                    : extra
+            };
+            _graphNodes.Add(gNode);
+
+            if (parentIndex >= 0)
+            {
+                _graphNodes[parentIndex].childIndices.Add(index);
+                _graphEdges.Add(new GraphEdge { fromIndex = parentIndex, toIndex = index });
+            }
+
+            foreach (var child in treeNode.children)
+            {
+                FlattenDependencyTree(child, depth + 1, index);
             }
 
             return index;
@@ -605,17 +854,6 @@ namespace ShaderMCP.Editor
         private void ComputeLayout()
         {
             if (_graphNodes == null || _graphNodes.Count == 0) return;
-
-            // Group nodes by depth
-            var depthGroups = new Dictionary<int, List<int>>();
-            int maxDepth = 0;
-            foreach (var node in _graphNodes)
-            {
-                if (!depthGroups.ContainsKey(node.depth))
-                    depthGroups[node.depth] = new List<int>();
-                depthGroups[node.depth].Add(_graphNodes.IndexOf(node));
-                if (node.depth > maxDepth) maxDepth = node.depth;
-            }
 
             // Simple tree layout: X by depth, Y by recursive centering
             float[] yPositions = new float[_graphNodes.Count];

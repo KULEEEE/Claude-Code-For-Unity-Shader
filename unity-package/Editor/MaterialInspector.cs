@@ -152,6 +152,94 @@ namespace ShaderMCP.Editor
 
         #endregion
 
+        #region Get Dependency Tree
+
+        /// <summary>
+        /// Build a Shader → Material → Texture dependency tree.
+        /// Returns JSON tree structure for graph visualization.
+        /// </summary>
+        public static string GetDependencyTree(string shaderPath)
+        {
+            var shaderAsset = AssetDatabase.LoadAssetAtPath<Shader>(shaderPath);
+            if (shaderAsset == null)
+            {
+                return JsonHelper.StartObject()
+                    .Key("error").Value($"Shader not found: {shaderPath}")
+                    .ToString();
+            }
+
+            var builder = JsonHelper.StartObject()
+                .Key("type").Value("shader")
+                .Key("name").Value(shaderAsset.name)
+                .Key("path").Value(shaderPath);
+
+            // Find all materials using this shader
+            var materialGuids = AssetDatabase.FindAssets("t:Material");
+            var materials = new List<Material>();
+            var materialPaths = new List<string>();
+
+            foreach (var guid in materialGuids)
+            {
+                string matPath = AssetDatabase.GUIDToAssetPath(guid);
+                if (!matPath.StartsWith("Assets/") && !matPath.StartsWith("Packages/"))
+                    continue;
+
+                var mat = AssetDatabase.LoadAssetAtPath<Material>(matPath);
+                if (mat != null && mat.shader == shaderAsset)
+                {
+                    materials.Add(mat);
+                    materialPaths.Add(matPath);
+                }
+            }
+
+            builder.Key("materialCount").Value(materials.Count)
+                .Key("children").BeginArray();
+
+            for (int m = 0; m < materials.Count; m++)
+            {
+                var mat = materials[m];
+                var matPath = materialPaths[m];
+
+                builder.BeginObject()
+                    .Key("type").Value("material")
+                    .Key("name").Value(mat.name)
+                    .Key("path").Value(matPath)
+                    .Key("children").BeginArray();
+
+                // Find texture properties
+                int propCount = shaderAsset.GetPropertyCount();
+                for (int i = 0; i < propCount; i++)
+                {
+                    if (shaderAsset.GetPropertyType(i) != ShaderPropertyType.Texture)
+                        continue;
+
+                    string propName = shaderAsset.GetPropertyName(i);
+                    Texture tex = null;
+                    try { tex = mat.GetTexture(propName); } catch { }
+
+                    if (tex == null) continue;
+
+                    string texPath = AssetDatabase.GetAssetPath(tex);
+                    if (string.IsNullOrEmpty(texPath)) continue;
+
+                    builder.BeginObject()
+                        .Key("type").Value("texture")
+                        .Key("name").Value(tex.name)
+                        .Key("path").Value(texPath)
+                        .Key("propertyName").Value(propName)
+                        .Key("textureSize").Value($"{tex.width}x{tex.height}")
+                    .EndObject();
+                }
+
+                builder.EndArray().EndObject();
+            }
+
+            builder.EndArray();
+            return builder.ToString();
+        }
+
+        #endregion
+
         #region Get Material Keywords
 
         public static string GetMaterialKeywords(string materialPath = null)

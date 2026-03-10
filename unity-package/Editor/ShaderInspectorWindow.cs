@@ -227,19 +227,19 @@ namespace ShaderMCP.Editor
             Repaint();
         }
 
-        /// <summary>Set the current shader context for AI chat.</summary>
-        public void SetAIContext(string shaderPath, string shaderName)
+        /// <summary>Set the current asset context for AI chat.</summary>
+        public void SetAIContext(string assetPath, string assetName)
         {
-            _selectedShaderPath = shaderPath;
-            _selectedShaderName = shaderName;
-            _aiChatTab?.SetContext(shaderPath, shaderName);
+            _selectedShaderPath = assetPath;
+            _selectedShaderName = assetName;
+            _aiChatTab?.SetContext(assetPath, assetName);
         }
 
         /// <summary>Switch to AI Chat tab with a pre-filled prompt.</summary>
-        public void AskAI(string prompt, string shaderContext = null)
+        public void AskAI(string prompt, string context = null)
         {
             _currentTab = Tab.AIChat;
-            _aiChatTab?.AskQuestion(prompt, shaderContext);
+            _aiChatTab?.AskQuestion(prompt, context);
             Repaint();
         }
 

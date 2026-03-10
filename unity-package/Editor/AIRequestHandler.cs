@@ -6,7 +6,7 @@ using UnityEngine;
 namespace ShaderMCP.Editor
 {
     /// <summary>
-    /// Manages AI query requests from the Shader Inspector to the MCP server.
+    /// Manages AI query requests from the Inspector to the MCP server.
     /// Uses the existing WebSocket connection (Unity is server, MCP is client).
     /// Unity sends "ai/query" messages to the connected MCP client, which calls Claude CLI.
     /// Supports streaming responses via onChunk callback.
@@ -41,20 +41,20 @@ namespace ShaderMCP.Editor
         /// <summary>
         /// Send an AI query (legacy single-callback overload for backward compatibility).
         /// </summary>
-        public static void SendQuery(string prompt, string shaderContext, Action<string> onResponse)
+        public static void SendQuery(string prompt, string context, Action<string> onResponse)
         {
-            SendQuery(prompt, shaderContext, null, onResponse);
+            SendQuery(prompt, context, null, onResponse);
         }
 
         /// <summary>
         /// Send an AI query with streaming support.
         /// </summary>
         /// <param name="prompt">The user's question or analysis prompt.</param>
-        /// <param name="shaderContext">Optional shader code/info context to include.</param>
+        /// <param name="context">Optional context to include (asset code, info, etc.).</param>
         /// <param name="onChunk">Called for each streaming chunk (may be null).</param>
         /// <param name="onComplete">Called with the full response text when complete.</param>
         /// <param name="onStatus">Called with progress status updates (may be null).</param>
-        public static void SendQuery(string prompt, string shaderContext, Action<string> onChunk, Action<string> onComplete, Action<string> onStatus = null, string language = null)
+        public static void SendQuery(string prompt, string context, Action<string> onChunk, Action<string> onComplete, Action<string> onStatus = null, string language = null)
         {
             if (!IsAvailable)
             {
@@ -71,8 +71,8 @@ namespace ShaderMCP.Editor
                 .Key("params").BeginObject()
                     .Key("prompt").Value(prompt);
 
-            if (!string.IsNullOrEmpty(shaderContext))
-                msgBuilder.Key("shaderContext").Value(shaderContext);
+            if (!string.IsNullOrEmpty(context))
+                msgBuilder.Key("context").Value(context);
 
             if (!string.IsNullOrEmpty(language))
                 msgBuilder.Key("language").Value(language);
