@@ -1,7 +1,7 @@
 using UnityEditor;
 using UnityEngine;
 
-namespace ShaderMCP.Editor
+namespace UnityAgent.Editor
 {
     /// <summary>
     /// Main Inspector EditorWindow.
@@ -33,7 +33,7 @@ namespace ShaderMCP.Editor
         private static readonly string[] LanguageCodes = { "", "Korean", "English", "Japanese", "Chinese" };
         public string SelectedLanguage => _languageIndex > 0 ? LanguageCodes[_languageIndex] : null;
 
-        [MenuItem("Tools/Unity MCP/Shader Inspector")]
+        [MenuItem("Tools/Unity Agent/Shader Inspector")]
         public static void ShowWindow()
         {
             var window = GetWindow<ShaderInspectorWindow>("Shader Inspector");
@@ -42,7 +42,7 @@ namespace ShaderMCP.Editor
 
         private void OnEnable()
         {
-            UnityMCPServer.EnsureRunning();
+            UnityAgentServer.EnsureRunning();
             _shaderTab = new ShaderBrowserTab(this);
             _materialTab = new MaterialListTab(this);
             _aiChatTab = new AIChatTab(this);

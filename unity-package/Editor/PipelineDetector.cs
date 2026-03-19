@@ -3,7 +3,7 @@ using System.Reflection;
 using UnityEngine;
 using UnityEngine.Rendering;
 
-namespace ShaderMCP.Editor
+namespace UnityAgent.Editor
 {
     /// <summary>
     /// Detects the current render pipeline (Built-in, URP, HDRP) and extracts settings.

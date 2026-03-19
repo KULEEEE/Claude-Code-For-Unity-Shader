@@ -8,7 +8,7 @@ interface PendingRequest {
 }
 
 /**
- * WebSocket client that connects to Unity Editor's ShaderMCP server.
+ * WebSocket client that connects to Unity Editor's Unity Agent server.
  * Features: auto-reconnect, UUID-based request/response matching, timeouts.
  */
 export class UnityBridge {
@@ -57,7 +57,7 @@ export class UnityBridge {
           this._isConnected = true;
           this.isConnecting = false;
           this.reconnectAttempts = 0;
-          console.error("[UnityMCP] Connected to Unity");
+          console.error("[UnityAgent] Connected to Unity");
           resolve();
         });
 
@@ -68,19 +68,19 @@ export class UnityBridge {
         this.ws.on("close", () => {
           this._isConnected = false;
           this.isConnecting = false;
-          console.error("[UnityMCP] Disconnected from Unity");
+          console.error("[UnityAgent] Disconnected from Unity");
           this.scheduleReconnect();
         });
 
         this.ws.on("error", (err: Error) => {
           this.isConnecting = false;
-          console.error(`[UnityMCP] WebSocket error: ${err.message}`);
+          console.error(`[UnityAgent] WebSocket error: ${err.message}`);
           // Don't reject — just schedule reconnect
           resolve();
         });
       } catch (err) {
         this.isConnecting = false;
-        console.error(`[UnityMCP] Connection failed: ${err}`);
+        console.error(`[UnityAgent] Connection failed: ${err}`);
         this.scheduleReconnect();
         resolve();
       }
@@ -97,7 +97,7 @@ export class UnityBridge {
   ): Promise<unknown> {
     if (!this.isConnected) {
       throw new Error(
-        "Not connected to Unity. Please ensure the Unity MCP Server is running in Unity Editor (Tools > Unity MCP > Server Window)."
+        "Not connected to Unity. Please ensure the Unity Agent Server is running in Unity Editor (Tools > Unity Agent > Server Window)."
       );
     }
 
@@ -156,7 +156,7 @@ export class UnityBridge {
    */
   sendRaw(message: Record<string, unknown>): void {
     if (!this.isConnected) {
-      console.error("[UnityMCP] Cannot send: not connected");
+      console.error("[UnityAgent] Cannot send: not connected");
       return;
     }
     this.ws!.send(JSON.stringify(message));
@@ -197,13 +197,13 @@ export class UnityBridge {
         pending.resolve(msg.result);
       }
     } catch (err) {
-      console.error(`[UnityMCP] Failed to parse message: ${err}`);
+      console.error(`[UnityAgent] Failed to parse message: ${err}`);
     }
   }
 
   private scheduleReconnect(): void {
     if (this.reconnectAttempts >= this.maxReconnectAttempts) {
-      console.error("[UnityMCP] Max reconnect attempts reached");
+      console.error("[UnityAgent] Max reconnect attempts reached");
       return;
     }
 
@@ -211,7 +211,7 @@ export class UnityBridge {
 
     this.reconnectAttempts++;
     console.error(
-      `[UnityMCP] Reconnecting in ${this.reconnectInterval}ms (attempt ${this.reconnectAttempts}/${this.maxReconnectAttempts})`
+      `[UnityAgent] Reconnecting in ${this.reconnectInterval}ms (attempt ${this.reconnectAttempts}/${this.maxReconnectAttempts})`
     );
 
     this.reconnectTimer = setTimeout(() => {

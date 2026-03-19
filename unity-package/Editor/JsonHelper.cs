@@ -4,7 +4,7 @@ using System.Globalization;
 using System.Text;
 using UnityEngine;
 
-namespace ShaderMCP.Editor
+namespace UnityAgent.Editor
 {
     /// <summary>
     /// JsonUtility wrapper that handles root-level arrays, dictionaries, and manual JSON building.

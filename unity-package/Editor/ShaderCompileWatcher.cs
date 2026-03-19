@@ -3,7 +3,7 @@ using System.Collections.Generic;
 using UnityEditor;
 using UnityEngine;
 
-namespace ShaderMCP.Editor
+namespace UnityAgent.Editor
 {
     /// <summary>
     /// Watches for shader compilation events by filtering Unity console log messages.

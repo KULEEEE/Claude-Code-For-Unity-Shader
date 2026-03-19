@@ -4,7 +4,7 @@ using System.Linq;
 using UnityEditor;
 using UnityEngine;
 
-namespace ShaderMCP.Editor
+namespace UnityAgent.Editor
 {
     /// <summary>
     /// Shaders tab: shader list (left), detail + analysis buttons (right).

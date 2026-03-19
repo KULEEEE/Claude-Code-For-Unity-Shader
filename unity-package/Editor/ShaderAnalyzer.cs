@@ -6,7 +6,7 @@ using UnityEditor;
 using UnityEngine;
 using UnityEngine.Rendering;
 
-namespace ShaderMCP.Editor
+namespace UnityAgent.Editor
 {
     /// <summary>
     /// Core shader analysis logic. Uses conditional compilation for Unity 6.0+ APIs
@@ -47,7 +47,7 @@ namespace ShaderMCP.Editor
             }
             catch (Exception ex)
             {
-                Debug.LogWarning($"[ShaderMCP] Reflection init failed: {ex.Message}");
+                Debug.LogWarning($"[UnityAgent] Reflection init failed: {ex.Message}");
             }
         }
 
@@ -136,7 +136,7 @@ namespace ShaderMCP.Editor
             }
             catch (Exception ex)
             {
-                Debug.LogWarning($"[ShaderMCP] Failed to get shader messages: {ex.Message}");
+                Debug.LogWarning($"[UnityAgent] Failed to get shader messages: {ex.Message}");
             }
 
             int variantCount = GetVariantCount(shader);
@@ -217,7 +217,7 @@ namespace ShaderMCP.Editor
             }
             catch (Exception ex)
             {
-                Debug.LogWarning($"[ShaderMCP] keywordSpace access failed: {ex.Message}");
+                Debug.LogWarning($"[UnityAgent] keywordSpace access failed: {ex.Message}");
             }
 #endif
 

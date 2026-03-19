@@ -1,11 +1,11 @@
 {
-  "name": "unity-mcp-tools",
+  "name": "unity-agent-tools",
   "version": "0.5.0",
-  "description": "MCP server for Unity Editor tools - shader analysis, error solving, and AI assistance via Claude Code",
+  "description": "Unity Agent - AI-powered Unity Editor tools for shader analysis and error auto-fix via Claude Code",
   "type": "module",
   "main": "dist/server.mjs",
   "bin": {
-    "unity-mcp-tools": "dist/server.mjs"
+    "unity-agent-tools": "dist/server.mjs"
   },
   "files": [
     "dist/server.mjs"

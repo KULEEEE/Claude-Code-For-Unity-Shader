@@ -56,7 +56,7 @@ export async function handleAIQuery(request: AIRequest): Promise<AIResponse> {
         permissionMode: "bypassPermissions",
         allowDangerouslySkipPermissions: true,
         mcpServers: {
-          "unity-mcp-tools": {
+          "unity-agent-tools": {
             command: "node",
             args: [serverPath],
           },

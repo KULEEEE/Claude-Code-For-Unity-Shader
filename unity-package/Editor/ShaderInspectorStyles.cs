@@ -1,7 +1,7 @@
 using UnityEditor;
 using UnityEngine;
 
-namespace ShaderMCP.Editor
+namespace UnityAgent.Editor
 {
     /// <summary>
     /// Centralized GUIStyle and Color constants for the Shader Inspector window.

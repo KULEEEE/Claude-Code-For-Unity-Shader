@@ -1,6 +1,6 @@
 {
-  "name": "ShaderMCP.Editor",
-  "rootNamespace": "ShaderMCP.Editor",
+  "name": "UnityAgent.Editor",
+  "rootNamespace": "UnityAgent.Editor",
   "references": [],
   "includePlatforms": [
     "Editor"
