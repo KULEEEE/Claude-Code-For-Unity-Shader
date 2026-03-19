@@ -1,11 +1,11 @@
 {
-  "name": "unity-shader-mcp",
-  "version": "0.4.0",
-  "description": "MCP server for Unity shader analysis tools - connects Unity Editor to AI coding assistants via Model Context Protocol",
+  "name": "unity-error-solver-mcp",
+  "version": "0.5.0",
+  "description": "MCP server for Unity error solving - captures Unity errors and provides AI-powered auto-fix via Claude Code",
   "type": "module",
   "main": "dist/server.mjs",
   "bin": {
-    "shader-mcp-server": "dist/server.mjs"
+    "unity-error-solver-mcp": "dist/server.mjs"
   },
   "files": [
     "dist/server.mjs"
@@ -20,13 +20,12 @@
   "keywords": [
     "mcp",
     "unity",
-    "shader",
-    "hlsl",
+    "error-solver",
+    "debug",
     "model-context-protocol",
     "game-dev",
-    "opencode",
     "claude",
-    "cursor"
+    "auto-fix"
   ],
   "repository": {
     "type": "git",
@@ -44,7 +43,6 @@
   "dependencies": {
     "@anthropic-ai/claude-agent-sdk": "^0.1.1",
     "@modelcontextprotocol/sdk": "^1.0.0",
-    "vscode-languageserver-protocol": "^3.17.5",
     "ws": "^8.16.0",
     "zod": "^3.22.0"
   },

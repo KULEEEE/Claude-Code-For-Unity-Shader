@@ -149,7 +149,7 @@ namespace ShaderMCP.Editor
                         sb.Clear();
                     }
                     EditorGUILayout.LabelField("────────────────────────────────────",
-                        ShaderInspectorStyles.MarkdownText);
+                        ErrorSolverStyles.MarkdownText);
                     continue;
                 }
 
@@ -225,7 +225,7 @@ namespace ShaderMCP.Editor
 
         private static void DrawRichLabel(string richText)
         {
-            var style = ShaderInspectorStyles.MarkdownText;
+            var style = ErrorSolverStyles.MarkdownText;
             var content = new GUIContent(richText);
             float height = style.CalcHeight(content, EditorGUIUtility.currentViewWidth - 120);
             EditorGUILayout.SelectableLabel(richText, style, GUILayout.Height(height + 2));
@@ -238,14 +238,14 @@ namespace ShaderMCP.Editor
         private static void RenderCodeBlock(string code, string language)
         {
             // Outer container with dark background
-            EditorGUILayout.BeginVertical(ShaderInspectorStyles.CodeBlockContainer);
+            EditorGUILayout.BeginVertical(ErrorSolverStyles.CodeBlockContainer);
 
             // Header: language label + copy button
             EditorGUILayout.BeginHorizontal();
             if (!string.IsNullOrEmpty(language))
             {
                 var oldColor = GUI.color;
-                GUI.color = ShaderInspectorStyles.DimText;
+                GUI.color = ErrorSolverStyles.DimText;
                 EditorGUILayout.LabelField(language, EditorStyles.miniLabel, GUILayout.Width(100));
                 GUI.color = oldColor;
             }
@@ -257,7 +257,7 @@ namespace ShaderMCP.Editor
             EditorGUILayout.EndHorizontal();
 
             // Code content - selectable for copy
-            var style = ShaderInspectorStyles.CodeBlockText;
+            var style = ErrorSolverStyles.CodeBlockText;
             var content = new GUIContent(code);
             float width = EditorGUIUtility.currentViewWidth - 140;
             if (width < 100) width = 100;

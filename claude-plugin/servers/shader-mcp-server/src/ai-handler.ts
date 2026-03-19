@@ -25,12 +25,18 @@ interface AIResponse {
  * Streams tokens in real-time via onChunk callback.
  */
 export async function handleAIQuery(request: AIRequest): Promise<AIResponse> {
-  const fullPrompt = buildFullPrompt(request.prompt, request.context, request.language, request.projectPath);
+  const fullPrompt = buildFullPrompt(
+    request.prompt,
+    request.context,
+    request.language,
+    request.projectPath
+  );
 
   // Use Unity project path as cwd if available, fallback to tmpdir
-  const cwd = request.projectPath && existsSync(request.projectPath)
-    ? request.projectPath
-    : tmpdir();
+  const cwd =
+    request.projectPath && existsSync(request.projectPath)
+      ? request.projectPath
+      : tmpdir();
 
   try {
     let resultText = "";
@@ -38,7 +44,10 @@ export async function handleAIQuery(request: AIRequest): Promise<AIResponse> {
     request.onStatus?.("⏳ Claude Code 작업 시작...");
 
     // Resolve path to this MCP server's entry point for the Agent SDK
-    const serverPath = join(dirname(fileURLToPath(import.meta.url)), "server.mjs");
+    const serverPath = join(
+      dirname(fileURLToPath(import.meta.url)),
+      "server.mjs"
+    );
 
     for await (const msg of query({
       prompt: fullPrompt,
@@ -47,7 +56,7 @@ export async function handleAIQuery(request: AIRequest): Promise<AIResponse> {
         permissionMode: "bypassPermissions",
         allowDangerouslySkipPermissions: true,
         mcpServers: {
-          "unity-shader-tools": {
+          "unity-error-solver": {
             command: "node",
             args: [serverPath],
           },
@@ -58,7 +67,7 @@ export async function handleAIQuery(request: AIRequest): Promise<AIResponse> {
         request.onStatus?.("⏳ Claude Code 작업 중...");
       }
 
-      // assistant message: show tool use status (text comes from result)
+      // assistant message: show tool use status
       if (msg.type === "assistant") {
         const content = (msg as any).message?.content;
         if (Array.isArray(content)) {
@@ -80,7 +89,10 @@ export async function handleAIQuery(request: AIRequest): Promise<AIResponse> {
       // stream_event: tool use start
       if (msg.type === "stream_event") {
         const event = (msg as any).event;
-        if (event?.type === "content_block_start" && event.content_block?.type === "tool_use") {
+        if (
+          event?.type === "content_block_start" &&
+          event.content_block?.type === "tool_use"
+        ) {
           request.onStatus?.(`⚙️ ${event.content_block.name}...`);
         }
       }
@@ -106,11 +118,16 @@ function buildFullPrompt(
 ): string {
   let prompt =
     "You are a Unity development expert assistant embedded in a Unity Editor plugin. " +
+    "Your primary job is to diagnose and fix Unity errors that prevent the project from compiling or running. " +
     "You can read, create, modify, and delete files in the Unity project. " +
-    "You have expertise in shaders (HLSL/ShaderLab), C# scripts, materials, textures, and all Unity workflows. " +
+    "You have expertise in C# scripting, Unity APIs, Unity Editor, build systems, and all Unity workflows. " +
     "Do NOT ask the user for file paths or project paths — the working directory is already set to the Unity project root. " +
-    "Answer clearly and concisely. " +
-    "When the user asks you to modify or create files, do it directly.\n";
+    "When fixing errors:\n" +
+    "1. First read the relevant source file(s) mentioned in the error\n" +
+    "2. Understand the root cause\n" +
+    "3. Apply the fix by writing the corrected file\n" +
+    "4. Explain what you changed and why\n" +
+    "Answer clearly and concisely.\n";
 
   if (projectPath) {
     prompt += `Unity project path: ${projectPath}\n`;

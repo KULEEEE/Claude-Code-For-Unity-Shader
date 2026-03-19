@@ -98,7 +98,7 @@ namespace ShaderMCP.Editor
             try
             {
                 ShaderMCPServer.SendToClient(message);
-                Debug.Log($"[ShaderInspector] AI query sent (id={id})");
+                Debug.Log($"[UnityMCP] AI query sent (id={id})");
             }
             catch (Exception ex)
             {
@@ -163,7 +163,7 @@ namespace ShaderMCP.Editor
             }
             else
             {
-                Debug.LogWarning($"[ShaderInspector] Received AI response for unknown id: {id}");
+                Debug.LogWarning($"[UnityMCP] Received AI response for unknown id: {id}");
             }
         }
 

@@ -104,10 +104,10 @@ namespace ShaderMCP.Editor
             _isRunning = false;
         }
 
-        [MenuItem("Tools/Shader MCP/Server Window")]
+        [MenuItem("Tools/Unity MCP/Server Window")]
         public static void ShowWindow()
         {
-            GetWindow<ShaderMCPServer>("Shader MCP Server");
+            GetWindow<ShaderMCPServer>("Unity MCP Server");
         }
 
         #region EditorWindow UI
@@ -173,7 +173,7 @@ namespace ShaderMCP.Editor
             bool serverRunningNow = _isRunning;
             EditorGUILayout.BeginHorizontal();
             _autoStartMCP = EditorGUILayout.ToggleLeft(
-                "Auto-start MCP Server (npx unity-shader-mcp)", _autoStartMCP, GUILayout.Width(350));
+                "Auto-start MCP Server (npx unity-error-solver-mcp)", _autoStartMCP, GUILayout.Width(380));
             EditorGUI.BeginDisabledGroup(!mcpRunningNow);
             if (GUILayout.Button("Stop MCP", GUILayout.Width(80)))
                 StopMCPServer();
@@ -250,7 +250,7 @@ namespace ShaderMCP.Editor
             catch (Exception ex)
             {
                 AddLog($"Failed to start server: {ex.Message}");
-                Debug.LogError($"[ShaderMCP] Failed to start server: {ex}");
+                Debug.LogError($"[UnityMCP] Failed to start server: {ex}");
             }
         }
 
@@ -301,10 +301,10 @@ namespace ShaderMCP.Editor
 
                 #if UNITY_EDITOR_WIN
                 startInfo.FileName = "cmd";
-                startInfo.Arguments = "/c npx -y unity-shader-mcp";
+                startInfo.Arguments = "/c npx -y unity-error-solver-mcp";
                 #else
                 startInfo.FileName = "npx";
-                startInfo.Arguments = "-y unity-shader-mcp";
+                startInfo.Arguments = "-y unity-error-solver-mcp";
                 #endif
 
                 startInfo.UseShellExecute = false;
@@ -333,12 +333,12 @@ namespace ShaderMCP.Editor
                 _mcpProcess.BeginErrorReadLine();
                 _mcpRunning = true;
 
-                AddLog("MCP server process started (npx unity-shader-mcp)");
+                AddLog("MCP server process started (npx unity-error-solver-mcp)");
             }
             catch (Exception ex)
             {
                 AddLog($"Failed to start MCP server: {ex.Message}");
-                Debug.LogWarning($"[ShaderMCP] Failed to start MCP server: {ex.Message}. " +
+                Debug.LogWarning($"[UnityMCP] Failed to start MCP server: {ex.Message}. " +
                     "Ensure Node.js 18+ is installed and npx is in PATH.");
                 _mcpRunning = false;
             }
@@ -859,90 +859,42 @@ namespace ShaderMCP.Editor
             if (_handlersRegistered) return;
             _handlersRegistered = true;
 
-            // Shader handlers
-            _messageHandler.RegisterHandler("shader/list", paramsJson =>
+            // Console error handlers
+            _messageHandler.RegisterHandler("console/getErrors", paramsJson =>
             {
-                string filter = JsonHelper.GetString(paramsJson, "filter");
-                return ShaderAnalyzer.ListAllShaders(filter);
+                bool includeWarnings = JsonHelper.GetBool(paramsJson, "includeWarnings", false);
+                int limit = JsonHelper.GetInt(paramsJson, "limit", 50);
+                return ErrorCollector.GetErrorsJson(includeWarnings, limit);
             });
 
-            _messageHandler.RegisterHandler("shader/compile", paramsJson =>
+            // Project file handlers
+            _messageHandler.RegisterHandler("project/readFile", paramsJson =>
             {
-                string shaderPath = JsonHelper.GetString(paramsJson, "shaderPath");
-                if (string.IsNullOrEmpty(shaderPath))
-                    return "{\"error\":\"Missing shaderPath parameter\"}";
-                return ShaderAnalyzer.CompileShader(shaderPath);
+                string filePath = JsonHelper.GetString(paramsJson, "filePath");
+                if (string.IsNullOrEmpty(filePath))
+                    return "{\"error\":\"Missing filePath parameter\"}";
+                return ErrorCollector.ReadProjectFile(filePath);
             });
 
-            _messageHandler.RegisterHandler("shader/variants", paramsJson =>
+            _messageHandler.RegisterHandler("project/writeFile", paramsJson =>
             {
-                string shaderPath = JsonHelper.GetString(paramsJson, "shaderPath");
-                if (string.IsNullOrEmpty(shaderPath))
-                    return "{\"error\":\"Missing shaderPath parameter\"}";
-                return ShaderAnalyzer.GetVariantInfo(shaderPath);
+                string filePath = JsonHelper.GetString(paramsJson, "filePath");
+                string content = JsonHelper.GetString(paramsJson, "content");
+                if (string.IsNullOrEmpty(filePath))
+                    return "{\"error\":\"Missing filePath parameter\"}";
+                if (content == null)
+                    return "{\"error\":\"Missing content parameter\"}";
+                return ErrorCollector.WriteProjectFile(filePath, content);
             });
 
-            _messageHandler.RegisterHandler("shader/properties", paramsJson =>
+            _messageHandler.RegisterHandler("project/listFiles", paramsJson =>
             {
-                string shaderPath = JsonHelper.GetString(paramsJson, "shaderPath");
-                if (string.IsNullOrEmpty(shaderPath))
-                    return "{\"error\":\"Missing shaderPath parameter\"}";
-                return ShaderAnalyzer.GetShaderProperties(shaderPath);
+                string directory = JsonHelper.GetString(paramsJson, "directory");
+                string pattern = JsonHelper.GetString(paramsJson, "pattern");
+                return ErrorCollector.ListProjectFiles(directory, pattern);
             });
 
-            _messageHandler.RegisterHandler("shader/getCode", paramsJson =>
-            {
-                string shaderPath = JsonHelper.GetString(paramsJson, "shaderPath");
-                if (string.IsNullOrEmpty(shaderPath))
-                    return "{\"error\":\"Missing shaderPath parameter\"}";
-                bool resolveIncludes = JsonHelper.GetBool(paramsJson, "resolveIncludes", false);
-                return ShaderAnalyzer.GetShaderCode(shaderPath, resolveIncludes);
-            });
-
-            _messageHandler.RegisterHandler("shader/includes", _ =>
-            {
-                return ShaderAnalyzer.GetIncludeFiles();
-            });
-
-            // Material handlers
-            _messageHandler.RegisterHandler("material/list", paramsJson =>
-            {
-                string filter = JsonHelper.GetString(paramsJson, "filter");
-                return MaterialInspector.ListAllMaterials(filter);
-            });
-
-            _messageHandler.RegisterHandler("material/info", paramsJson =>
-            {
-                string materialPath = JsonHelper.GetString(paramsJson, "materialPath");
-                if (string.IsNullOrEmpty(materialPath))
-                    return "{\"error\":\"Missing materialPath parameter\"}";
-                return MaterialInspector.GetMaterialInfo(materialPath);
-            });
-
-            _messageHandler.RegisterHandler("material/keywords", paramsJson =>
-            {
-                string materialPath = JsonHelper.GetString(paramsJson, "materialPath");
-                return MaterialInspector.GetMaterialKeywords(materialPath);
-            });
-
-            // Pipeline handlers
-            _messageHandler.RegisterHandler("pipeline/info", _ =>
-            {
-                return PipelineDetector.GetPipelineInfoJson();
-            });
-
-            _messageHandler.RegisterHandler("pipeline/qualitySettings", _ =>
-            {
-                return PipelineDetector.GetQualitySettingsJson();
-            });
-
-            // Editor handlers
-            _messageHandler.RegisterHandler("editor/logs", paramsJson =>
-            {
-                string severity = JsonHelper.GetString(paramsJson, "severity") ?? "all";
-                return ShaderCompileWatcher.GetLogsJson(severity);
-            });
-
+            // Editor info handler
             _messageHandler.RegisterHandler("editor/platform", _ =>
             {
                 var builder = JsonHelper.StartObject()
@@ -1011,7 +963,7 @@ namespace ShaderMCP.Editor
                 if (_logEntries.Count > 500)
                     _logEntries.RemoveAt(0);
             }
-            Debug.Log($"[ShaderMCP] {message}");
+            Debug.Log($"[UnityMCP] {message}");
         }
 
         #endregion
