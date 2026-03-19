@@ -4,9 +4,7 @@ using System.Diagnostics;
 using System.IO;
 using System.Net;
 using System.Net.Sockets;
-using System.Security.Cryptography;
 using System.Text;
-using System.Threading;
 using UnityEditor;
 using UnityEngine;
 using Debug = UnityEngine.Debug;
@@ -14,44 +12,36 @@ using Debug = UnityEngine.Debug;
 namespace ShaderMCP.Editor
 {
     /// <summary>
-    /// WebSocket server (RFC 6455) running on localhost:8090.
-    /// Uses TcpListener + manual handshake (Unity Mono lacks HttpListener WebSocket support).
-    /// Supports multiple concurrent WebSocket clients.
-    /// Provides an EditorWindow UI for monitoring connections.
+    /// Background WebSocket server (RFC 6455) on localhost:8090.
+    /// No EditorWindow — starts automatically when any tool window needs it.
+    /// Registers handlers for both Shader tools and Error Solver tools.
     /// </summary>
     [InitializeOnLoad]
-    public class ShaderMCPServer : EditorWindow
+    public static class UnityMCPServer
     {
         private const int DefaultPort = 8090;
         private const string WebSocketMagicGuid = "258EAFA5-E914-47DA-95CA-C5AB0DC85B11";
 
-        // Client connection wrapper
         private class ClientConnection
         {
             public TcpClient client;
             public NetworkStream stream;
         }
 
-        // Server state (static to survive domain reload)
+        // Server state
         private static TcpListener _listener;
         private static readonly List<ClientConnection> _clients = new List<ClientConnection>();
         private static bool _isRunning;
         private static int _port = DefaultPort;
         private static readonly MessageHandler _messageHandler = new MessageHandler();
-        private static readonly List<string> _logEntries = new List<string>();
         private static readonly object _logLock = new object();
         private static bool _handlersRegistered;
 
         // MCP Server process
         private static Process _mcpProcess;
         private static bool _mcpRunning;
-        private static bool _autoStartMCP = true;
 
-        // EditorWindow state
-        private Vector2 _logScrollPos;
-        private bool _autoScroll = true;
-
-        static ShaderMCPServer()
+        static UnityMCPServer()
         {
             RegisterHandlers();
             EditorApplication.update -= Update;
@@ -61,11 +51,10 @@ namespace ShaderMCP.Editor
             AssemblyReloadEvents.beforeAssemblyReload -= OnBeforeAssemblyReload;
             AssemblyReloadEvents.beforeAssemblyReload += OnBeforeAssemblyReload;
 
-            // Auto-restart after domain reload if server was previously running
-            // SessionState cannot be called from static constructors, so defer it.
+            // Auto-restart after domain reload
             EditorApplication.delayCall += () =>
             {
-                if (SessionState.GetBool("ShaderMCP_WasRunning", false))
+                if (SessionState.GetBool("UnityMCP_WasRunning", false))
                 {
                     StartServer();
                 }
@@ -74,15 +63,9 @@ namespace ShaderMCP.Editor
 
         private static void OnBeforeAssemblyReload()
         {
-            // Remember state before domain reload
-            SessionState.SetBool("ShaderMCP_WasRunning", _isRunning);
-            // Remember MCP state too
-            SessionState.SetBool("ShaderMCP_MCPWasRunning", _mcpRunning);
-
-            // Kill MCP process tree before domain reload
+            SessionState.SetBool("UnityMCP_WasRunning", _isRunning);
             StopMCPServer();
 
-            // Release all sockets before domain reload to prevent port leaks
             try
             {
                 foreach (var conn in _clients)
@@ -104,124 +87,50 @@ namespace ShaderMCP.Editor
             _isRunning = false;
         }
 
-        [MenuItem("Tools/Unity MCP/Server Window")]
-        public static void ShowWindow()
+        #region Public API
+
+        /// <summary>
+        /// Whether the WebSocket server is running.
+        /// </summary>
+        public static bool IsRunning => _isRunning;
+
+        /// <summary>
+        /// Whether any MCP client is connected.
+        /// </summary>
+        public static bool IsClientConnected
         {
-            GetWindow<ShaderMCPServer>("Unity MCP Server");
+            get
+            {
+                foreach (var conn in _clients)
+                    if (conn.client != null && conn.client.Connected)
+                        return true;
+                return false;
+            }
         }
 
-        #region EditorWindow UI
-
-        private void OnGUI()
+        /// <summary>
+        /// Call this from any tool window's OnEnable to ensure the server is running.
+        /// </summary>
+        public static void EnsureRunning()
         {
-            // Cache volatile state at start of OnGUI to prevent layout mismatches
-            bool isRunningNow = _isRunning;
-            int connectedCount = 0;
-            foreach (var c in _clients)
-            {
-                if (c.client != null && c.client.Connected) connectedCount++;
-            }
-            bool mcpRunningCached = _mcpRunning;
-
-            EditorGUILayout.Space(5);
-
-            // Connection status
-            EditorGUILayout.BeginHorizontal();
-            var oldColor = GUI.color;
-            GUI.color = isRunningNow ? Color.green : Color.red;
-            EditorGUILayout.LabelField(isRunningNow ? "● Running" : "● Stopped",
-                EditorStyles.boldLabel, GUILayout.Width(100));
-            GUI.color = oldColor;
-
-            GUI.color = connectedCount > 0 ? Color.cyan : Color.gray;
-            EditorGUILayout.LabelField(connectedCount > 0 ? $"Clients: {connectedCount}" : "No Client",
-                GUILayout.Width(120));
-            GUI.color = oldColor;
-
-            // MCP process status
-            GUI.color = mcpRunningCached ? Color.green : Color.gray;
-            EditorGUILayout.LabelField(mcpRunningCached ? "MCP: Running" : "MCP: Stopped",
-                GUILayout.Width(100));
-            GUI.color = oldColor;
-
-            GUILayout.FlexibleSpace();
-            EditorGUILayout.EndHorizontal();
-
-            EditorGUILayout.Space(3);
-
-            // Port setting
-            EditorGUILayout.BeginHorizontal();
-            EditorGUI.BeginDisabledGroup(_isRunning);
-            _port = EditorGUILayout.IntField("Port", _port, GUILayout.Width(250));
-            EditorGUI.EndDisabledGroup();
-
-            // Start/Stop buttons
             if (!_isRunning)
-            {
-                if (GUILayout.Button("Start Server", GUILayout.Width(120)))
-                    StartServer();
-            }
-            else
-            {
-                if (GUILayout.Button("Stop Server", GUILayout.Width(120)))
-                    StopServer();
-            }
-            EditorGUILayout.EndHorizontal();
-
-            // Auto-start MCP toggle (cache state to avoid layout mismatch)
-            bool mcpRunningNow = _mcpRunning;
-            bool serverRunningNow = _isRunning;
-            EditorGUILayout.BeginHorizontal();
-            _autoStartMCP = EditorGUILayout.ToggleLeft(
-                "Auto-start MCP Server (npx unity-error-solver-mcp)", _autoStartMCP, GUILayout.Width(380));
-            EditorGUI.BeginDisabledGroup(!mcpRunningNow);
-            if (GUILayout.Button("Stop MCP", GUILayout.Width(80)))
-                StopMCPServer();
-            EditorGUI.EndDisabledGroup();
-            EditorGUI.BeginDisabledGroup(mcpRunningNow || !serverRunningNow);
-            if (GUILayout.Button("Start MCP", GUILayout.Width(80)))
-                StartMCPServer();
-            EditorGUI.EndDisabledGroup();
-            EditorGUILayout.EndHorizontal();
-
-            EditorGUILayout.Space(5);
-            EditorGUILayout.LabelField("Log", EditorStyles.boldLabel);
-
-            // Log controls
-            EditorGUILayout.BeginHorizontal();
-            _autoScroll = EditorGUILayout.ToggleLeft("Auto-scroll", _autoScroll, GUILayout.Width(100));
-            GUILayout.FlexibleSpace();
-            if (GUILayout.Button("Clear Log", GUILayout.Width(80)))
-            {
-                lock (_logLock) { _logEntries.Clear(); }
-            }
-            EditorGUILayout.EndHorizontal();
-
-            // Log view — snapshot to prevent Layout/Repaint mismatch
-            string[] logSnapshot;
-            lock (_logLock) { logSnapshot = _logEntries.ToArray(); }
-
-            _logScrollPos = EditorGUILayout.BeginScrollView(_logScrollPos,
-                GUILayout.ExpandHeight(true));
-
-            foreach (var entry in logSnapshot)
-            {
-                EditorGUILayout.LabelField(entry, EditorStyles.wordWrappedMiniLabel);
-            }
-
-            EditorGUILayout.EndScrollView();
-
-            if (_autoScroll)
-                _logScrollPos.y = float.MaxValue;
-
-            // Repaint periodically when running
-            if (_isRunning)
-                Repaint();
+                StartServer();
         }
 
-        private void OnDestroy()
+        /// <summary>
+        /// Send a message to the first available MCP client.
+        /// </summary>
+        public static void SendToClient(string message)
         {
-            // Window closed, but server keeps running
+            foreach (var conn in _clients)
+            {
+                if (conn.client != null && conn.client.Connected && conn.stream != null)
+                {
+                    SendWebSocketMessage(conn.stream, message);
+                    return;
+                }
+            }
+            throw new InvalidOperationException("No client connected");
         }
 
         #endregion
@@ -237,19 +146,13 @@ namespace ShaderMCP.Editor
                 RegisterHandlers();
                 _listener = new TcpListener(IPAddress.Loopback, _port);
                 _listener.Server.SetSocketOption(
-                    System.Net.Sockets.SocketOptionLevel.Socket,
-                    System.Net.Sockets.SocketOptionName.ReuseAddress, true);
+                    SocketOptionLevel.Socket, SocketOptionName.ReuseAddress, true);
                 _listener.Start();
                 _isRunning = true;
-                AddLog($"Server started on ws://localhost:{_port}");
-
-                // Auto-start MCP server process
-                if (_autoStartMCP)
-                    StartMCPServer();
+                Debug.Log($"[UnityMCP] Server started on ws://localhost:{_port}");
             }
             catch (Exception ex)
             {
-                AddLog($"Failed to start server: {ex.Message}");
                 Debug.LogError($"[UnityMCP] Failed to start server: {ex}");
             }
         }
@@ -257,7 +160,6 @@ namespace ShaderMCP.Editor
         public static void StopServer()
         {
             _isRunning = false;
-
             StopMCPServer();
 
             try
@@ -266,7 +168,7 @@ namespace ShaderMCP.Editor
                 {
                     try
                     {
-                        conn.client.Client.LingerState = new System.Net.Sockets.LingerOption(true, 0);
+                        conn.client.Client.LingerState = new LingerOption(true, 0);
                         conn.stream?.Close();
                         conn.client?.Close();
                     }
@@ -276,18 +178,16 @@ namespace ShaderMCP.Editor
 
                 if (_listener != null)
                 {
-                    try { _listener.Server.LingerState = new System.Net.Sockets.LingerOption(true, 0); }
-                    catch { }
-                    try { _listener.Server.Close(); }
-                    catch { }
+                    try { _listener.Server.LingerState = new LingerOption(true, 0); } catch { }
+                    try { _listener.Server.Close(); } catch { }
                     _listener.Stop();
                     _listener = null;
                 }
-                AddLog("Server stopped");
+                Debug.Log("[UnityMCP] Server stopped");
             }
             catch (Exception ex)
             {
-                AddLog($"Error stopping server: {ex.Message}");
+                Debug.LogError($"[UnityMCP] Error stopping server: {ex.Message}");
             }
         }
 
@@ -319,25 +219,22 @@ namespace ShaderMCP.Editor
                 _mcpProcess.Exited += (sender, args) =>
                 {
                     _mcpRunning = false;
-                    AddLog("MCP server process exited");
                 };
 
-                // Capture stderr for logging (MCP uses stdout for protocol, stderr for logs)
                 _mcpProcess.ErrorDataReceived += (sender, args) =>
                 {
                     if (!string.IsNullOrEmpty(args.Data))
-                        AddLog($"[MCP] {args.Data}");
+                        Debug.Log($"[UnityMCP] [MCP] {args.Data}");
                 };
 
                 _mcpProcess.Start();
                 _mcpProcess.BeginErrorReadLine();
                 _mcpRunning = true;
 
-                AddLog("MCP server process started (npx unity-error-solver-mcp)");
+                Debug.Log("[UnityMCP] MCP server process started");
             }
             catch (Exception ex)
             {
-                AddLog($"Failed to start MCP server: {ex.Message}");
                 Debug.LogWarning($"[UnityMCP] Failed to start MCP server: {ex.Message}. " +
                     "Ensure Node.js 18+ is installed and npx is in PATH.");
                 _mcpRunning = false;
@@ -352,9 +249,6 @@ namespace ShaderMCP.Editor
             {
                 if (!_mcpProcess.HasExited)
                 {
-                    // On Windows, cmd /c npx spawns child node.exe processes.
-                    // Process.Kill() only kills cmd.exe, leaving node.exe orphaned.
-                    // Use taskkill /T /F to kill the entire process tree.
                     #if UNITY_EDITOR_WIN
                     try
                     {
@@ -369,10 +263,7 @@ namespace ShaderMCP.Editor
                         });
                         killProc?.WaitForExit(5000);
                     }
-                    catch
-                    {
-                        _mcpProcess.Kill();
-                    }
+                    catch { _mcpProcess.Kill(); }
                     #else
                     _mcpProcess.Kill();
                     #endif
@@ -380,15 +271,11 @@ namespace ShaderMCP.Editor
                 }
                 _mcpProcess.Dispose();
             }
-            catch (Exception ex)
-            {
-                AddLog($"Error stopping MCP server: {ex.Message}");
-            }
+            catch { }
             finally
             {
                 _mcpProcess = null;
                 _mcpRunning = false;
-                AddLog("MCP server process stopped");
             }
         }
 
@@ -399,7 +286,7 @@ namespace ShaderMCP.Editor
 
         #endregion
 
-        #region Main Thread Update (Non-blocking Polling)
+        #region Main Thread Update
 
         private static void Update()
         {
@@ -407,22 +294,18 @@ namespace ShaderMCP.Editor
 
             try
             {
-                // Accept new connections
                 if (_listener.Pending())
                 {
                     var newClient = _listener.AcceptTcpClient();
                     HandleNewConnection(newClient);
                 }
 
-                // Read from all connected clients (iterate in reverse for safe removal)
                 for (int i = _clients.Count - 1; i >= 0; i--)
                 {
                     var conn = _clients[i];
                     if (conn.client == null || !conn.client.Connected)
                     {
-                        AddLog("Client disconnected");
-                        try { conn.stream?.Close(); conn.client?.Close(); }
-                        catch { }
+                        try { conn.stream?.Close(); conn.client?.Close(); } catch { }
                         _clients.RemoveAt(i);
                         continue;
                     }
@@ -435,13 +318,13 @@ namespace ShaderMCP.Editor
             }
             catch (Exception ex)
             {
-                AddLog($"Update error: {ex.Message}");
+                Debug.LogWarning($"[UnityMCP] Update error: {ex.Message}");
             }
         }
 
         #endregion
 
-        #region WebSocket Handshake (RFC 6455)
+        #region WebSocket Handshake
 
         private static void HandleNewConnection(TcpClient client)
         {
@@ -451,7 +334,6 @@ namespace ShaderMCP.Editor
                 client.ReceiveTimeout = 5000;
                 client.NoDelay = true;
 
-                // Read HTTP upgrade request (loop until we get the full header ending with \r\n\r\n)
                 var requestBuilder = new StringBuilder();
                 byte[] buffer = new byte[4096];
                 while (true)
@@ -463,17 +345,12 @@ namespace ShaderMCP.Editor
                 }
                 string request = requestBuilder.ToString();
 
-                AddLog($"Handshake request received ({request.Length} bytes)");
-
-                string requestLower = request.ToLowerInvariant();
-                if (!requestLower.Contains("upgrade: websocket"))
+                if (!request.ToLowerInvariant().Contains("upgrade: websocket"))
                 {
                     client.Close();
-                    AddLog("Non-WebSocket connection rejected");
                     return;
                 }
 
-                // Extract Sec-WebSocket-Key
                 string key = null;
                 string[] lines = request.Split(new[] { "\r\n" }, StringSplitOptions.None);
                 foreach (var line in lines)
@@ -482,15 +359,10 @@ namespace ShaderMCP.Editor
                     {
                         int colonPos = line.IndexOf(':');
                         string raw = line.Substring(colonPos + 1);
-                        // Strip all whitespace and control characters
                         var sb = new StringBuilder();
                         foreach (char c in raw)
                         {
                             if (c > ' ') sb.Append(c);
-                            else if (c == ' ' && sb.Length > 0 && sb[sb.Length - 1] != ' ')
-                            {
-                                // keep single internal space — but base64 keys have no spaces
-                            }
                         }
                         key = sb.ToString().Trim();
                         break;
@@ -500,36 +372,28 @@ namespace ShaderMCP.Editor
                 if (string.IsNullOrEmpty(key))
                 {
                     client.Close();
-                    AddLog("Missing Sec-WebSocket-Key");
                     return;
                 }
 
-                AddLog($"Sec-WebSocket-Key: [{key}] (len={key.Length})");
-
-                // Compute accept hash
                 string acceptKey = ComputeWebSocketAcceptKey(key);
-                AddLog($"Sec-WebSocket-Accept: [{acceptKey}]");
 
-                // Send handshake response — build as explicit byte array to avoid encoding issues
                 string response = "HTTP/1.1 101 Switching Protocols\r\n" +
                                   "Upgrade: websocket\r\n" +
                                   "Connection: Upgrade\r\n" +
                                   "Sec-WebSocket-Accept: " + acceptKey + "\r\n" +
                                   "\r\n";
 
-                AddLog($"Response ({response.Length} chars): {response.Replace("\r", "\\r").Replace("\n", "\\n")}");
                 byte[] responseBytes = Encoding.ASCII.GetBytes(response);
-                AddLog($"Response bytes: {responseBytes.Length}, last4=[{responseBytes[responseBytes.Length-4]:X2} {responseBytes[responseBytes.Length-3]:X2} {responseBytes[responseBytes.Length-2]:X2} {responseBytes[responseBytes.Length-1]:X2}]");
                 stream.Write(responseBytes, 0, responseBytes.Length);
                 stream.Flush();
 
-                client.ReceiveTimeout = 0; // Non-blocking after handshake
+                client.ReceiveTimeout = 0;
                 _clients.Add(new ClientConnection { client = client, stream = stream });
-                AddLog($"Client connected (WebSocket handshake complete, total: {_clients.Count})");
+                Debug.Log($"[UnityMCP] Client connected (total: {_clients.Count})");
             }
             catch (Exception ex)
             {
-                AddLog($"Handshake failed: {ex.Message}");
+                Debug.LogWarning($"[UnityMCP] Handshake failed: {ex.Message}");
                 client.Close();
             }
         }
@@ -537,41 +401,25 @@ namespace ShaderMCP.Editor
         private static string ComputeWebSocketAcceptKey(string key)
         {
             string combined = key + WebSocketMagicGuid;
-            AddLog($"SHA1 input: [{combined}] (len={combined.Length})");
             byte[] inputBytes = Encoding.ASCII.GetBytes(combined);
             byte[] hash = ComputeSHA1(inputBytes);
-            string hex = "";
-            foreach (byte b in hash) hex += b.ToString("x2");
-            AddLog($"SHA1 hash hex: {hex}");
             return Convert.ToBase64String(hash);
         }
 
-        /// <summary>
-        /// Pure managed SHA-1 implementation (RFC 3174).
-        /// Avoids Unity Mono runtime issues with System.Security.Cryptography.
-        /// </summary>
         private static byte[] ComputeSHA1(byte[] message)
         {
-            uint h0 = 0x67452301;
-            uint h1 = 0xEFCDAB89;
-            uint h2 = 0x98BADCFE;
-            uint h3 = 0x10325476;
-            uint h4 = 0xC3D2E1F0;
-
+            uint h0 = 0x67452301, h1 = 0xEFCDAB89, h2 = 0x98BADCFE, h3 = 0x10325476, h4 = 0xC3D2E1F0;
             long msgBitLen = (long)message.Length * 8;
 
-            // Pre-processing: add padding
             int padLen = (56 - (message.Length + 1) % 64);
             if (padLen < 0) padLen += 64;
             byte[] padded = new byte[message.Length + 1 + padLen + 8];
             Array.Copy(message, padded, message.Length);
             padded[message.Length] = 0x80;
 
-            // Append length in bits as big-endian 64-bit
             for (int i = 0; i < 8; i++)
                 padded[padded.Length - 1 - i] = (byte)(msgBitLen >> (i * 8));
 
-            // Process each 512-bit (64-byte) block
             uint[] w = new uint[80];
             for (int offset = 0; offset < padded.Length; offset += 64)
             {
@@ -585,7 +433,6 @@ namespace ShaderMCP.Editor
                     w[i] = RotateLeft(w[i - 3] ^ w[i - 8] ^ w[i - 14] ^ w[i - 16], 1);
 
                 uint a = h0, b = h1, c = h2, d = h3, e = h4;
-
                 for (int i = 0; i < 80; i++)
                 {
                     uint f, k;
@@ -597,35 +444,24 @@ namespace ShaderMCP.Editor
                     uint temp = RotateLeft(a, 5) + f + e + k + w[i];
                     e = d; d = c; c = RotateLeft(b, 30); b = a; a = temp;
                 }
-
                 h0 += a; h1 += b; h2 += c; h3 += d; h4 += e;
             }
 
             byte[] result = new byte[20];
-            WriteBigEndian(result, 0, h0);
-            WriteBigEndian(result, 4, h1);
-            WriteBigEndian(result, 8, h2);
-            WriteBigEndian(result, 12, h3);
-            WriteBigEndian(result, 16, h4);
+            WriteBE(result, 0, h0); WriteBE(result, 4, h1); WriteBE(result, 8, h2);
+            WriteBE(result, 12, h3); WriteBE(result, 16, h4);
             return result;
         }
 
-        private static uint RotateLeft(uint value, int count)
-        {
-            return (value << count) | (value >> (32 - count));
-        }
-
-        private static void WriteBigEndian(byte[] buf, int offset, uint value)
-        {
-            buf[offset]     = (byte)(value >> 24);
-            buf[offset + 1] = (byte)(value >> 16);
-            buf[offset + 2] = (byte)(value >> 8);
-            buf[offset + 3] = (byte)(value);
+        private static uint RotateLeft(uint v, int c) => (v << c) | (v >> (32 - c));
+        private static void WriteBE(byte[] b, int o, uint v) {
+            b[o] = (byte)(v >> 24); b[o+1] = (byte)(v >> 16);
+            b[o+2] = (byte)(v >> 8); b[o+3] = (byte)v;
         }
 
         #endregion
 
-        #region WebSocket Frame Read/Write (RFC 6455)
+        #region WebSocket Frame Read/Write
 
         private static void ReadWebSocketFrames(ClientConnection conn)
         {
@@ -635,56 +471,43 @@ namespace ShaderMCP.Editor
                 {
                     string message = ReadWebSocketMessage(conn);
                     if (message == null) break;
-                    if (message.Length == 0) continue; // Control frame handled
+                    if (message.Length == 0) continue;
 
-                    AddLog($"← {(message.Length > 200 ? message.Substring(0, 200) + "..." : message)}");
-
-                    // Check if this is an AI message (from MCP server back to Unity)
+                    // AI messages (reverse direction: MCP → Unity)
                     string msgMethod = JsonHelper.GetString(message, "method");
                     if (msgMethod == "ai/status")
                     {
-                        string aiId = JsonHelper.GetString(message, "id");
-                        string aiStatus = JsonHelper.GetString(message, "status");
-                        AIRequestHandler.HandleStatus(aiId, aiStatus);
+                        AIRequestHandler.HandleStatus(
+                            JsonHelper.GetString(message, "id"),
+                            JsonHelper.GetString(message, "status"));
                         continue;
                     }
-
                     if (msgMethod == "ai/chunk")
                     {
-                        string aiId = JsonHelper.GetString(message, "id");
-                        string aiChunk = JsonHelper.GetString(message, "chunk");
-                        AIRequestHandler.HandleChunk(aiId, aiChunk);
+                        AIRequestHandler.HandleChunk(
+                            JsonHelper.GetString(message, "id"),
+                            JsonHelper.GetString(message, "chunk"));
                         continue;
                     }
-
                     if (msgMethod == "ai/response")
                     {
                         string aiId = JsonHelper.GetString(message, "id");
-                        string aiResult = JsonHelper.GetString(message, "result");
                         string aiError = JsonHelper.GetString(message, "error");
                         if (!string.IsNullOrEmpty(aiError))
                             AIRequestHandler.HandleError(aiId, aiError);
                         else
-                            AIRequestHandler.HandleResponse(aiId, aiResult ?? "");
+                            AIRequestHandler.HandleResponse(aiId, JsonHelper.GetString(message, "result") ?? "");
                         continue;
                     }
 
-                    // Process normal request and respond to the SAME client
+                    // Normal request → handler → response
                     string responseJson = _messageHandler.ProcessMessage(message);
                     SendWebSocketMessage(conn.stream, responseJson);
-                    AddLog($"→ {(responseJson.Length > 200 ? responseJson.Substring(0, 200) + "..." : responseJson)}");
                 }
             }
-            catch (Exception ex)
+            catch (Exception)
             {
-                AddLog($"Frame read error: {ex.Message}");
-                // Connection may be broken — will be cleaned up in Update()
-                try
-                {
-                    conn.stream?.Close();
-                    conn.client?.Close();
-                }
-                catch { }
+                try { conn.stream?.Close(); conn.client?.Close(); } catch { }
                 conn.client = null;
                 conn.stream = null;
             }
@@ -695,32 +518,28 @@ namespace ShaderMCP.Editor
             var stream = conn.stream;
             if (stream == null || !stream.CanRead) return null;
 
-            // Read first 2 bytes
             byte[] header = new byte[2];
-            int read = ReadFully(stream, header, 0, 2);
-            if (read < 2) return null;
+            if (ReadFully(stream, header, 0, 2) < 2) return null;
 
             byte opcode = (byte)(header[0] & 0x0F);
             bool masked = (header[1] & 0x80) != 0;
             long payloadLength = header[1] & 0x7F;
 
-            // Extended payload length
             if (payloadLength == 126)
             {
-                byte[] extLen = new byte[2];
-                ReadFully(stream, extLen, 0, 2);
-                payloadLength = (extLen[0] << 8) | extLen[1];
+                byte[] ext = new byte[2];
+                ReadFully(stream, ext, 0, 2);
+                payloadLength = (ext[0] << 8) | ext[1];
             }
             else if (payloadLength == 127)
             {
-                byte[] extLen = new byte[8];
-                ReadFully(stream, extLen, 0, 8);
+                byte[] ext = new byte[8];
+                ReadFully(stream, ext, 0, 8);
                 payloadLength = 0;
                 for (int i = 0; i < 8; i++)
-                    payloadLength = (payloadLength << 8) | extLen[i];
+                    payloadLength = (payloadLength << 8) | ext[i];
             }
 
-            // Masking key
             byte[] maskKey = null;
             if (masked)
             {
@@ -728,40 +547,27 @@ namespace ShaderMCP.Editor
                 ReadFully(stream, maskKey, 0, 4);
             }
 
-            // Payload
             byte[] payload = new byte[payloadLength];
             if (payloadLength > 0)
-            {
                 ReadFully(stream, payload, 0, (int)payloadLength);
-            }
 
-            // Unmask
             if (masked && maskKey != null)
-            {
                 for (int i = 0; i < payload.Length; i++)
                     payload[i] ^= maskKey[i % 4];
-            }
 
-            // Handle opcodes
             switch (opcode)
             {
-                case 0x1: // Text
-                    return Encoding.UTF8.GetString(payload);
-                case 0x8: // Close
-                    AddLog("Client sent close frame");
+                case 0x1: return Encoding.UTF8.GetString(payload);
+                case 0x8:
                     SendCloseFrame(stream);
-                    try { stream.Close(); conn.client?.Close(); }
-                    catch { }
-                    conn.client = null;
-                    conn.stream = null;
+                    try { stream.Close(); conn.client?.Close(); } catch { }
+                    conn.client = null; conn.stream = null;
                     return null;
-                case 0x9: // Ping
+                case 0x9:
                     SendPongFrame(stream, payload);
-                    return ""; // Signal control frame handled
-                case 0xA: // Pong
-                    return ""; // Ignore pong
-                default:
-                    return Encoding.UTF8.GetString(payload);
+                    return "";
+                case 0xA: return "";
+                default: return Encoding.UTF8.GetString(payload);
             }
         }
 
@@ -775,15 +581,14 @@ namespace ShaderMCP.Editor
             if (payload.Length < 126)
             {
                 frame = new byte[2 + payload.Length];
-                frame[0] = 0x81; // FIN + Text
+                frame[0] = 0x81;
                 frame[1] = (byte)payload.Length;
                 Buffer.BlockCopy(payload, 0, frame, 2, payload.Length);
             }
             else if (payload.Length < 65536)
             {
                 frame = new byte[4 + payload.Length];
-                frame[0] = 0x81;
-                frame[1] = 126;
+                frame[0] = 0x81; frame[1] = 126;
                 frame[2] = (byte)(payload.Length >> 8);
                 frame[3] = (byte)(payload.Length & 0xFF);
                 Buffer.BlockCopy(payload, 0, frame, 4, payload.Length);
@@ -791,13 +596,10 @@ namespace ShaderMCP.Editor
             else
             {
                 frame = new byte[10 + payload.Length];
-                frame[0] = 0x81;
-                frame[1] = 127;
+                frame[0] = 0x81; frame[1] = 127;
                 long len = payload.Length;
                 for (int i = 7; i >= 0; i--)
-                {
                     frame[2 + (7 - i)] = (byte)(len >> (i * 8));
-                }
                 Buffer.BlockCopy(payload, 0, frame, 10, payload.Length);
             }
 
@@ -807,13 +609,7 @@ namespace ShaderMCP.Editor
 
         private static void SendCloseFrame(NetworkStream stream)
         {
-            try
-            {
-                byte[] frame = new byte[] { 0x88, 0x00 };
-                stream?.Write(frame, 0, frame.Length);
-                stream?.Flush();
-            }
-            catch { }
+            try { stream?.Write(new byte[] { 0x88, 0x00 }, 0, 2); stream?.Flush(); } catch { }
         }
 
         private static void SendPongFrame(NetworkStream stream, byte[] payload)
@@ -824,14 +620,11 @@ namespace ShaderMCP.Editor
                 if (payload.Length < 126)
                 {
                     frame = new byte[2 + payload.Length];
-                    frame[0] = 0x8A; // FIN + Pong
+                    frame[0] = 0x8A;
                     frame[1] = (byte)payload.Length;
                     Buffer.BlockCopy(payload, 0, frame, 2, payload.Length);
                 }
-                else
-                {
-                    frame = new byte[] { 0x8A, 0x00 };
-                }
+                else frame = new byte[] { 0x8A, 0x00 };
                 stream?.Write(frame, 0, frame.Length);
                 stream?.Flush();
             }
@@ -859,7 +652,84 @@ namespace ShaderMCP.Editor
             if (_handlersRegistered) return;
             _handlersRegistered = true;
 
-            // Console error handlers
+            // ── Shader handlers ──
+            _messageHandler.RegisterHandler("shader/list", paramsJson =>
+            {
+                string filter = JsonHelper.GetString(paramsJson, "filter");
+                return ShaderAnalyzer.ListAllShaders(filter);
+            });
+
+            _messageHandler.RegisterHandler("shader/compile", paramsJson =>
+            {
+                string shaderPath = JsonHelper.GetString(paramsJson, "shaderPath");
+                if (string.IsNullOrEmpty(shaderPath))
+                    return "{\"error\":\"Missing shaderPath parameter\"}";
+                return ShaderAnalyzer.CompileShader(shaderPath);
+            });
+
+            _messageHandler.RegisterHandler("shader/variants", paramsJson =>
+            {
+                string shaderPath = JsonHelper.GetString(paramsJson, "shaderPath");
+                if (string.IsNullOrEmpty(shaderPath))
+                    return "{\"error\":\"Missing shaderPath parameter\"}";
+                return ShaderAnalyzer.GetVariantInfo(shaderPath);
+            });
+
+            _messageHandler.RegisterHandler("shader/properties", paramsJson =>
+            {
+                string shaderPath = JsonHelper.GetString(paramsJson, "shaderPath");
+                if (string.IsNullOrEmpty(shaderPath))
+                    return "{\"error\":\"Missing shaderPath parameter\"}";
+                return ShaderAnalyzer.GetShaderProperties(shaderPath);
+            });
+
+            _messageHandler.RegisterHandler("shader/getCode", paramsJson =>
+            {
+                string shaderPath = JsonHelper.GetString(paramsJson, "shaderPath");
+                if (string.IsNullOrEmpty(shaderPath))
+                    return "{\"error\":\"Missing shaderPath parameter\"}";
+                bool resolveIncludes = JsonHelper.GetBool(paramsJson, "resolveIncludes", false);
+                return ShaderAnalyzer.GetShaderCode(shaderPath, resolveIncludes);
+            });
+
+            _messageHandler.RegisterHandler("shader/includes", _ =>
+            {
+                return ShaderAnalyzer.GetIncludeFiles();
+            });
+
+            // ── Material handlers ──
+            _messageHandler.RegisterHandler("material/list", paramsJson =>
+            {
+                string filter = JsonHelper.GetString(paramsJson, "filter");
+                return MaterialInspector.ListAllMaterials(filter);
+            });
+
+            _messageHandler.RegisterHandler("material/info", paramsJson =>
+            {
+                string materialPath = JsonHelper.GetString(paramsJson, "materialPath");
+                if (string.IsNullOrEmpty(materialPath))
+                    return "{\"error\":\"Missing materialPath parameter\"}";
+                return MaterialInspector.GetMaterialInfo(materialPath);
+            });
+
+            _messageHandler.RegisterHandler("material/keywords", paramsJson =>
+            {
+                string materialPath = JsonHelper.GetString(paramsJson, "materialPath");
+                return MaterialInspector.GetMaterialKeywords(materialPath);
+            });
+
+            // ── Pipeline handlers ──
+            _messageHandler.RegisterHandler("pipeline/info", _ =>
+            {
+                return PipelineDetector.GetPipelineInfoJson();
+            });
+
+            _messageHandler.RegisterHandler("pipeline/qualitySettings", _ =>
+            {
+                return PipelineDetector.GetQualitySettingsJson();
+            });
+
+            // ── Error Solver handlers ──
             _messageHandler.RegisterHandler("console/getErrors", paramsJson =>
             {
                 bool includeWarnings = JsonHelper.GetBool(paramsJson, "includeWarnings", false);
@@ -867,7 +737,6 @@ namespace ShaderMCP.Editor
                 return ErrorCollector.GetErrorsJson(includeWarnings, limit);
             });
 
-            // Project file handlers
             _messageHandler.RegisterHandler("project/readFile", paramsJson =>
             {
                 string filePath = JsonHelper.GetString(paramsJson, "filePath");
@@ -894,76 +763,26 @@ namespace ShaderMCP.Editor
                 return ErrorCollector.ListProjectFiles(directory, pattern);
             });
 
-            // Editor info handler
+            // ── Editor info ──
+            _messageHandler.RegisterHandler("editor/logs", paramsJson =>
+            {
+                string severity = JsonHelper.GetString(paramsJson, "severity") ?? "all";
+                return ShaderCompileWatcher.GetLogsJson(severity);
+            });
+
             _messageHandler.RegisterHandler("editor/platform", _ =>
             {
-                var builder = JsonHelper.StartObject()
+                return JsonHelper.StartObject()
                     .Key("platform").Value(EditorUserBuildSettings.activeBuildTarget.ToString())
-                    .Key("graphicsApi").Value(UnityEngine.SystemInfo.graphicsDeviceType.ToString())
-                    .Key("graphicsDeviceName").Value(UnityEngine.SystemInfo.graphicsDeviceName)
+                    .Key("graphicsApi").Value(SystemInfo.graphicsDeviceType.ToString())
+                    .Key("graphicsDeviceName").Value(SystemInfo.graphicsDeviceName)
                     .Key("unityVersion").Value(Application.unityVersion)
                     .Key("operatingSystem").Value(SystemInfo.operatingSystem)
                     .Key("scriptingBackend").Value(
                         PlayerSettings.GetScriptingBackend(
-                            EditorUserBuildSettings.selectedBuildTargetGroup).ToString());
-
-                return builder.ToString();
+                            EditorUserBuildSettings.selectedBuildTargetGroup).ToString())
+                    .ToString();
             });
-        }
-
-        #endregion
-
-        #region Public API for AI Integration
-
-        /// <summary>
-        /// Whether any WebSocket client (MCP server) is currently connected.
-        /// </summary>
-        public static bool IsClientConnected
-        {
-            get
-            {
-                foreach (var conn in _clients)
-                {
-                    if (conn.client != null && conn.client.Connected)
-                        return true;
-                }
-                return false;
-            }
-        }
-
-        /// <summary>
-        /// Send a message to the first available connected MCP client.
-        /// Used by AIRequestHandler to push AI query requests.
-        /// </summary>
-        public static void SendToClient(string message)
-        {
-            foreach (var conn in _clients)
-            {
-                if (conn.client != null && conn.client.Connected && conn.stream != null)
-                {
-                    SendWebSocketMessage(conn.stream, message);
-                    AddLog($"→ AI: {(message.Length > 200 ? message.Substring(0, 200) + "..." : message)}");
-                    return;
-                }
-            }
-
-            throw new InvalidOperationException("No client connected");
-        }
-
-        #endregion
-
-        #region Logging
-
-        private static void AddLog(string message)
-        {
-            string entry = $"[{DateTime.Now:HH:mm:ss}] {message}";
-            lock (_logLock)
-            {
-                _logEntries.Add(entry);
-                if (_logEntries.Count > 500)
-                    _logEntries.RemoveAt(0);
-            }
-            Debug.Log($"[UnityMCP] {message}");
         }
 
         #endregion

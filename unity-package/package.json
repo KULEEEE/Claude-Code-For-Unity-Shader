@@ -1,8 +1,8 @@
 {
-  "name": "com.unity-mcp.error-solver",
+  "name": "com.unity-mcp.tools",
   "version": "0.5.0",
-  "displayName": "Unity MCP Error Solver",
-  "description": "Unity Editor plugin that captures console errors and provides AI-powered auto-fix via MCP integration with Claude Code.",
+  "displayName": "Unity MCP Tools",
+  "description": "Unity Editor plugin providing shader analysis and error auto-fix via MCP integration with Claude Code.",
   "unity": "2021.3",
   "keywords": [
     "error",

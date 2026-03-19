@@ -45,6 +45,7 @@ namespace ShaderMCP.Editor
 
         private void OnEnable()
         {
+            UnityMCPServer.EnsureRunning();
             ErrorCollector.OnErrorsChanged += OnErrorsChanged;
             RefreshErrors();
         }
@@ -173,8 +174,8 @@ namespace ShaderMCP.Editor
             GUI.color = oldColor;
 
             // Connection status
-            GUI.color = ShaderMCPServer.IsClientConnected ? ErrorSolverStyles.SuccessColor : ErrorSolverStyles.DimText;
-            GUILayout.Label(ShaderMCPServer.IsClientConnected ? "● AI Connected" : "● AI Offline",
+            GUI.color = UnityMCPServer.IsClientConnected ? ErrorSolverStyles.SuccessColor : ErrorSolverStyles.DimText;
+            GUILayout.Label(UnityMCPServer.IsClientConnected ? "● AI Connected" : "● AI Offline",
                 EditorStyles.toolbarButton, GUILayout.Width(90));
             GUI.color = oldColor;
 

@@ -1,27 +1,67 @@
 import { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import { StdioServerTransport } from "@modelcontextprotocol/sdk/server/stdio.js";
 import { UnityBridge } from "./unity-bridge.js";
+import { ShaderLspClient } from "./lsp-client.js";
 import { handleAIQuery } from "./ai-handler.js";
 
-// Tools
+// Shader Tools
+import { registerShaderCompileTool } from "./tools/shader-compile.js";
+import { registerShaderAnalyzeTools } from "./tools/shader-analyze.js";
+import { registerShaderVariantsTools } from "./tools/shader-variants.js";
+import { registerShaderPropertiesTools } from "./tools/shader-properties.js";
+import { registerMaterialInfoTools } from "./tools/material-info.js";
+
+// LSP Tools
+import { registerLspHoverTool } from "./tools/lsp-hover.js";
+import { registerLspCompletionTool } from "./tools/lsp-completion.js";
+import { registerLspSignatureTool } from "./tools/lsp-signature.js";
+import { registerLspDiagnosticsTool } from "./tools/lsp-diagnostics.js";
+
+// Error Solver Tools
 import { registerGetUnityErrorsTool } from "./tools/get-unity-errors.js";
 import { registerReadProjectFileTool } from "./tools/read-project-file.js";
 import { registerWriteProjectFileTool } from "./tools/write-project-file.js";
 import { registerListProjectFilesTool } from "./tools/list-project-files.js";
 
+// Resources
+import { registerPipelineInfoResource } from "./resources/pipeline-info.js";
+import { registerShaderIncludesResource } from "./resources/shader-includes.js";
+import { registerShaderKeywordsResource } from "./resources/shader-keywords.js";
+import { registerEditorPlatformResource } from "./resources/editor-platform.js";
+
 async function main(): Promise<void> {
   const server = new McpServer({
-    name: "unity-error-solver",
+    name: "unity-mcp-tools",
     version: "0.5.0",
   });
 
   const bridge = new UnityBridge("ws://localhost:8090");
+  const lspClient = new ShaderLspClient();
 
-  // Register error-solving tools
+  // ── Shader Tools ──
+  registerShaderCompileTool(server, bridge);
+  registerShaderAnalyzeTools(server, bridge);
+  registerShaderVariantsTools(server, bridge);
+  registerShaderPropertiesTools(server, bridge);
+  registerMaterialInfoTools(server, bridge);
+
+  // ── LSP Tools ──
+  registerLspHoverTool(server, lspClient);
+  registerLspCompletionTool(server, lspClient);
+  registerLspSignatureTool(server, lspClient);
+  registerLspDiagnosticsTool(server, lspClient);
+
+  // ── Error Solver Tools ──
   registerGetUnityErrorsTool(server, bridge);
   registerReadProjectFileTool(server, bridge);
   registerWriteProjectFileTool(server, bridge);
   registerListProjectFilesTool(server, bridge);
+
+  // ── Resources ──
+  registerPipelineInfoResource(server, bridge);
+  registerShaderIncludesResource(server, bridge);
+  registerShaderKeywordsResource(server, bridge);
+  registerEditorPlatformResource(server, bridge);
 
   // Register AI query handler (Unity → MCP → Claude CLI → MCP → Unity)
   bridge.onMessage(async (msg) => {
@@ -31,6 +71,7 @@ async function main(): Promise<void> {
     const params = msg.params as {
       prompt?: string;
       context?: string;
+      shaderContext?: string;
       language?: string;
       projectPath?: string;
     } | undefined;
@@ -47,7 +88,7 @@ async function main(): Promise<void> {
     try {
       const result = await handleAIQuery({
         prompt: params.prompt,
-        context: params.context,
+        context: params.context ?? params.shaderContext,
         language: params.language,
         projectPath: params.projectPath,
         onChunk: (chunk: string) => {
@@ -59,51 +100,34 @@ async function main(): Promise<void> {
       });
 
       if (result.success) {
-        bridge.sendRaw({
-          method: "ai/response",
-          id,
-          result: result.response,
-        });
+        bridge.sendRaw({ method: "ai/response", id, result: result.response });
       } else {
-        bridge.sendRaw({
-          method: "ai/response",
-          id,
-          error: result.error,
-        });
+        bridge.sendRaw({ method: "ai/response", id, error: result.error });
       }
     } catch (err: unknown) {
       const errMsg = err instanceof Error ? err.message : String(err);
-      bridge.sendRaw({
-        method: "ai/response",
-        id,
-        error: `AI handler error: ${errMsg}`,
-      });
+      bridge.sendRaw({ method: "ai/response", id, error: `AI handler error: ${errMsg}` });
     }
   });
 
-  // Connect to Unity (non-blocking — server starts even if Unity is not running)
+  // Connect to Unity
   bridge.connect().catch(() => {
-    console.error(
-      "[UnityMCP] Initial connection to Unity failed. Will retry automatically."
-    );
+    console.error("[UnityMCP] Initial connection to Unity failed. Will retry automatically.");
   });
 
   // Start MCP server on stdio
   const transport = new StdioServerTransport();
   await server.connect(transport);
-
   console.error("[UnityMCP] MCP server started on stdio");
 
   // Cleanup on exit
-  process.on("SIGINT", async () => {
+  const cleanup = async () => {
+    await lspClient.shutdown();
     bridge.disconnect();
     process.exit(0);
-  });
-
-  process.on("SIGTERM", async () => {
-    bridge.disconnect();
-    process.exit(0);
-  });
+  };
+  process.on("SIGINT", cleanup);
+  process.on("SIGTERM", cleanup);
 }
 
 main().catch((err) => {
