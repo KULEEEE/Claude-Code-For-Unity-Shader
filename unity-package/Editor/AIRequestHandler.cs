@@ -36,7 +36,7 @@ namespace ShaderMCP.Editor
         /// <summary>
         /// Whether AI functionality is available (MCP server connected).
         /// </summary>
-        public static bool IsAvailable => ShaderMCPServer.IsClientConnected;
+        public static bool IsAvailable => UnityMCPServer.IsClientConnected;
 
         /// <summary>
         /// Send an AI query (legacy single-callback overload for backward compatibility).
@@ -97,7 +97,7 @@ namespace ShaderMCP.Editor
 
             try
             {
-                ShaderMCPServer.SendToClient(message);
+                UnityMCPServer.SendToClient(message);
                 Debug.Log($"[UnityMCP] AI query sent (id={id})");
             }
             catch (Exception ex)
@@ -109,7 +109,7 @@ namespace ShaderMCP.Editor
 
         /// <summary>
         /// Handle a status update received from the MCP server.
-        /// Called by ShaderMCPServer when it receives an "ai/status" message.
+        /// Called by UnityMCPServer when it receives an "ai/status" message.
         /// </summary>
         public static void HandleStatus(string id, string status)
         {
@@ -127,7 +127,7 @@ namespace ShaderMCP.Editor
 
         /// <summary>
         /// Handle a streaming chunk received from the MCP server.
-        /// Called by ShaderMCPServer when it receives an "ai/chunk" message.
+        /// Called by UnityMCPServer when it receives an "ai/chunk" message.
         /// </summary>
         public static void HandleChunk(string id, string chunk)
         {
@@ -146,7 +146,7 @@ namespace ShaderMCP.Editor
 
         /// <summary>
         /// Handle an AI response received from the MCP server.
-        /// Called by ShaderMCPServer when it receives an "ai/response" message.
+        /// Called by UnityMCPServer when it receives an "ai/response" message.
         /// </summary>
         public static void HandleResponse(string id, string responseText)
         {
