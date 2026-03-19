@@ -77,55 +77,43 @@ namespace UnityAgent.Editor
 
             EditorGUILayout.Space(2);
 
-            // Main content: split between error list and detail/AI panel
-            var mainRect = EditorGUILayout.BeginVertical(GUILayout.ExpandHeight(true));
+            // Top: Error list (fixed height portion)
+            EditorGUILayout.LabelField("Errors", ErrorSolverStyles.SectionHeader);
+            float listHeight = position.height * _splitRatio;
+            _errorListScroll = EditorGUILayout.BeginScrollView(_errorListScroll,
+                GUILayout.Height(listHeight));
+            DrawErrorList();
+            EditorGUILayout.EndScrollView();
 
-            if (mainRect.width > 1)
+            // Splitter
+            var splitterRect = EditorGUILayout.GetControlRect(false, 4);
+            EditorGUI.DrawRect(splitterRect, ErrorSolverStyles.SplitterColor);
+            EditorGUIUtility.AddCursorRect(splitterRect, MouseCursor.ResizeVertical);
+
+            if (Event.current.type == EventType.MouseDown && splitterRect.Contains(Event.current.mousePosition))
             {
-                float totalHeight = mainRect.height;
-                float topHeight = totalHeight * _splitRatio;
-                float splitterHeight = 4;
-                float bottomHeight = totalHeight - topHeight - splitterHeight;
-
-                // Top: Error list
-                GUILayout.BeginArea(new Rect(mainRect.x, mainRect.y, mainRect.width, topHeight));
-                DrawErrorList(mainRect.width, topHeight);
-                GUILayout.EndArea();
-
-                // Splitter
-                var splitterRect = new Rect(mainRect.x, mainRect.y + topHeight, mainRect.width, splitterHeight);
-                EditorGUI.DrawRect(splitterRect, ErrorSolverStyles.SplitterColor);
-                EditorGUIUtility.AddCursorRect(splitterRect, MouseCursor.ResizeVertical);
-
-                if (Event.current.type == EventType.MouseDown && splitterRect.Contains(Event.current.mousePosition))
+                _isDraggingSplitter = true;
+                Event.current.Use();
+            }
+            if (_isDraggingSplitter)
+            {
+                if (Event.current.type == EventType.MouseDrag)
                 {
-                    _isDraggingSplitter = true;
+                    _splitRatio = Mathf.Clamp(Event.current.mousePosition.y / position.height, 0.15f, 0.75f);
+                    Event.current.Use();
+                    Repaint();
+                }
+                if (Event.current.type == EventType.MouseUp)
+                {
+                    _isDraggingSplitter = false;
                     Event.current.Use();
                 }
-
-                if (_isDraggingSplitter)
-                {
-                    if (Event.current.type == EventType.MouseDrag)
-                    {
-                        _splitRatio = Mathf.Clamp((Event.current.mousePosition.y - mainRect.y) / totalHeight, 0.15f, 0.85f);
-                        Event.current.Use();
-                        Repaint();
-                    }
-                    if (Event.current.type == EventType.MouseUp)
-                    {
-                        _isDraggingSplitter = false;
-                        Event.current.Use();
-                    }
-                }
-
-                // Bottom: Detail + AI Response
-                GUILayout.BeginArea(new Rect(mainRect.x, mainRect.y + topHeight + splitterHeight,
-                    mainRect.width, bottomHeight));
-                DrawDetailPanel(mainRect.width, bottomHeight);
-                GUILayout.EndArea();
             }
 
-            EditorGUILayout.EndVertical();
+            // Bottom: Detail + AI Response
+            _detailScroll = EditorGUILayout.BeginScrollView(_detailScroll);
+            DrawDetailPanel();
+            EditorGUILayout.EndScrollView();
 
             // Repaint while solving
             if (_isSolving)
@@ -201,10 +189,8 @@ namespace UnityAgent.Editor
 
         #region Error List
 
-        private void DrawErrorList(float width, float height)
+        private void DrawErrorList()
         {
-            _errorListScroll = GUILayout.BeginScrollView(_errorListScroll);
-
             if (_cachedErrors.Count == 0 && (!_showWarnings || _cachedWarnings.Count == 0))
             {
                 EditorGUILayout.Space(20);
@@ -233,7 +219,6 @@ namespace UnityAgent.Editor
                 }
             }
 
-            GUILayout.EndScrollView();
         }
 
         private void DrawErrorEntry(ErrorCollector.ErrorEntry entry, int index, bool isWarning)
@@ -307,10 +292,8 @@ namespace UnityAgent.Editor
 
         #region Detail Panel
 
-        private void DrawDetailPanel(float width, float height)
+        private void DrawDetailPanel()
         {
-            _detailScroll = GUILayout.BeginScrollView(_detailScroll);
-
             ErrorCollector.ErrorEntry selected = GetSelectedError();
 
             if (selected == null)
@@ -354,10 +337,11 @@ namespace UnityAgent.Editor
 
                 // Error message
                 EditorGUILayout.LabelField("Message:", EditorStyles.boldLabel);
+                float availWidth = EditorGUIUtility.currentViewWidth - 40;
                 EditorGUILayout.SelectableLabel(selected.message, EditorStyles.wordWrappedLabel,
                     GUILayout.Height(EditorStyles.wordWrappedLabel.CalcHeight(
                         new GUIContent(selected.message),
-                        width - 20) + 4));
+                        availWidth) + 4));
 
                 // Source file
                 if (!string.IsNullOrEmpty(selected.sourceFile))
@@ -387,7 +371,7 @@ namespace UnityAgent.Editor
                     string st = selected.stackTrace;
                     if (st.Length > 2000) st = st.Substring(0, 2000) + "\n... (truncated)";
                     float stHeight = ErrorSolverStyles.StackTraceArea.CalcHeight(
-                        new GUIContent(st), width - 20);
+                        new GUIContent(st), availWidth);
                     stHeight = Mathf.Min(stHeight, 150);
                     EditorGUILayout.SelectableLabel(st, ErrorSolverStyles.StackTraceArea,
                         GUILayout.Height(stHeight + 4));
@@ -416,8 +400,6 @@ namespace UnityAgent.Editor
                     }
                 }
             }
-
-            GUILayout.EndScrollView();
         }
 
         private ErrorCollector.ErrorEntry GetSelectedError()
