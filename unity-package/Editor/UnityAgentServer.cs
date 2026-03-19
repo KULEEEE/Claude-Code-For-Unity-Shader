@@ -110,11 +110,14 @@ namespace UnityAgent.Editor
 
         /// <summary>
         /// Call this from any tool window's OnEnable to ensure the server is running.
+        /// Automatically starts both the WebSocket server and the MCP bridge process.
         /// </summary>
         public static void EnsureRunning()
         {
             if (!_isRunning)
                 StartServer();
+            if (!_mcpRunning)
+                StartMCPServer();
         }
 
         /// <summary>
@@ -201,10 +204,10 @@ namespace UnityAgent.Editor
 
                 #if UNITY_EDITOR_WIN
                 startInfo.FileName = "cmd";
-                startInfo.Arguments = "/c npx -y unity-error-solver-mcp";
+                startInfo.Arguments = "/c npx -y unity-agent-tools";
                 #else
                 startInfo.FileName = "npx";
-                startInfo.Arguments = "-y unity-error-solver-mcp";
+                startInfo.Arguments = "-y unity-agent-tools";
                 #endif
 
                 startInfo.UseShellExecute = false;
