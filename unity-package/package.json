@@ -1,19 +1,19 @@
 {
-  "name": "com.shader-mcp.bridge",
-  "version": "0.4.0",
-  "displayName": "Shader MCP Bridge",
-  "description": "Unity Editor plugin that exposes shader analysis tools via WebSocket for MCP integration with Claude Code.",
+  "name": "com.unity-mcp.error-solver",
+  "version": "0.5.0",
+  "displayName": "Unity MCP Error Solver",
+  "description": "Unity Editor plugin that captures console errors and provides AI-powered auto-fix via MCP integration with Claude Code.",
   "unity": "2021.3",
   "keywords": [
-    "shader",
+    "error",
+    "debug",
     "mcp",
     "claude",
-    "tools",
-    "ai"
+    "ai",
+    "auto-fix"
   ],
   "author": {
-    "name": "Shader MCP",
-    "url": "https://github.com/shader-mcp/unity-shader-mcp"
+    "name": "Unity MCP"
   },
   "license": "MIT"
 }
