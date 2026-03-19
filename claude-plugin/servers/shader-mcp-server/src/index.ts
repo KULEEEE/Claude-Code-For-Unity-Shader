@@ -31,7 +31,7 @@ import { registerEditorPlatformResource } from "./resources/editor-platform.js";
 
 async function main(): Promise<void> {
   const server = new McpServer({
-    name: "unity-mcp-tools",
+    name: "unity-agent-tools",
     version: "0.5.0",
   });
 
@@ -77,12 +77,12 @@ async function main(): Promise<void> {
     } | undefined;
 
     if (!id || !params?.prompt) {
-      console.error("[UnityMCP] Invalid AI query: missing id or prompt");
+      console.error("[UnityAgent] Invalid AI query: missing id or prompt");
       return;
     }
 
     console.error(
-      `[UnityMCP] AI query received (id=${id}): ${(params.prompt as string).substring(0, 80)}...`
+      `[UnityAgent] AI query received (id=${id}): ${(params.prompt as string).substring(0, 80)}...`
     );
 
     try {
@@ -112,13 +112,13 @@ async function main(): Promise<void> {
 
   // Connect to Unity
   bridge.connect().catch(() => {
-    console.error("[UnityMCP] Initial connection to Unity failed. Will retry automatically.");
+    console.error("[UnityAgent] Initial connection to Unity failed. Will retry automatically.");
   });
 
   // Start MCP server on stdio
   const transport = new StdioServerTransport();
   await server.connect(transport);
-  console.error("[UnityMCP] MCP server started on stdio");
+  console.error("[UnityAgent] MCP server started on stdio");
 
   // Cleanup on exit
   const cleanup = async () => {
@@ -131,6 +131,6 @@ async function main(): Promise<void> {
 }
 
 main().catch((err) => {
-  console.error(`[UnityMCP] Fatal error: ${err}`);
+  console.error(`[UnityAgent] Fatal error: ${err}`);
   process.exit(1);
 });

@@ -30792,7 +30792,7 @@ var UnityBridge = class {
           this._isConnected = true;
           this.isConnecting = false;
           this.reconnectAttempts = 0;
-          console.error("[UnityMCP] Connected to Unity");
+          console.error("[UnityAgent] Connected to Unity");
           resolve2();
         });
         this.ws.on("message", (data) => {
@@ -30801,17 +30801,17 @@ var UnityBridge = class {
         this.ws.on("close", () => {
           this._isConnected = false;
           this.isConnecting = false;
-          console.error("[UnityMCP] Disconnected from Unity");
+          console.error("[UnityAgent] Disconnected from Unity");
           this.scheduleReconnect();
         });
         this.ws.on("error", (err) => {
           this.isConnecting = false;
-          console.error(`[UnityMCP] WebSocket error: ${err.message}`);
+          console.error(`[UnityAgent] WebSocket error: ${err.message}`);
           resolve2();
         });
       } catch (err) {
         this.isConnecting = false;
-        console.error(`[UnityMCP] Connection failed: ${err}`);
+        console.error(`[UnityAgent] Connection failed: ${err}`);
         this.scheduleReconnect();
         resolve2();
       }
@@ -30822,7 +30822,7 @@ var UnityBridge = class {
    */
   async request(method, params = {}, timeoutMs) {
     if (!this.isConnected) {
-      throw new Error("Not connected to Unity. Please ensure the Unity MCP Server is running in Unity Editor (Tools > Unity MCP > Server Window).");
+      throw new Error("Not connected to Unity. Please ensure the Unity Agent Server is running in Unity Editor (Tools > Unity Agent > Server Window).");
     }
     const id = randomUUID();
     const timeout = timeoutMs ?? this.defaultTimeout;
@@ -30868,7 +30868,7 @@ var UnityBridge = class {
    */
   sendRaw(message) {
     if (!this.isConnected) {
-      console.error("[UnityMCP] Cannot send: not connected");
+      console.error("[UnityAgent] Cannot send: not connected");
       return;
     }
     this.ws.send(JSON.stringify(message));
@@ -30898,18 +30898,18 @@ var UnityBridge = class {
         pending.resolve(msg.result);
       }
     } catch (err) {
-      console.error(`[UnityMCP] Failed to parse message: ${err}`);
+      console.error(`[UnityAgent] Failed to parse message: ${err}`);
     }
   }
   scheduleReconnect() {
     if (this.reconnectAttempts >= this.maxReconnectAttempts) {
-      console.error("[UnityMCP] Max reconnect attempts reached");
+      console.error("[UnityAgent] Max reconnect attempts reached");
       return;
     }
     if (this.reconnectTimer)
       return;
     this.reconnectAttempts++;
-    console.error(`[UnityMCP] Reconnecting in ${this.reconnectInterval}ms (attempt ${this.reconnectAttempts}/${this.maxReconnectAttempts})`);
+    console.error(`[UnityAgent] Reconnecting in ${this.reconnectInterval}ms (attempt ${this.reconnectAttempts}/${this.maxReconnectAttempts})`);
     this.reconnectTimer = setTimeout(() => {
       this.reconnectTimer = null;
       this.connect().catch(() => {
@@ -30980,12 +30980,12 @@ var ShaderLspClient = class {
       }
       this.process.on("exit", (code) => {
         if (!this.isShuttingDown) {
-          console.error(`[ShaderMCP-LSP] shader-ls exited with code ${code}. Will restart on next request.`);
+          console.error(`[UnityAgent-LSP] shader-ls exited with code ${code}. Will restart on next request.`);
         }
         this.cleanup();
       });
       this.process.on("error", (err) => {
-        console.error(`[ShaderMCP-LSP] shader-ls process error: ${err.message}`);
+        console.error(`[UnityAgent-LSP] shader-ls process error: ${err.message}`);
         this.cleanup();
       });
       this.process.stderr?.on("data", (data) => {
@@ -30998,27 +30998,27 @@ var ShaderLspClient = class {
     }
   }
   async autoInstall() {
-    console.error("[ShaderMCP-LSP] shader-ls not found. Attempting auto-install...");
+    console.error("[UnityAgent-LSP] shader-ls not found. Attempting auto-install...");
     const dotnetCmd = process.platform === "win32" ? "where dotnet" : "which dotnet";
     try {
       execSync(dotnetCmd, { stdio: "pipe" });
     } catch {
       throw new Error("shader-ls is not installed and .NET SDK was not found.\nTo use LSP features, please:\n1. Install .NET 7.0+ SDK from https://dotnet.microsoft.com/download\n2. Run: dotnet tool install --global shader-ls\n\nNote: Existing shader MCP tools (compile, analyze, etc.) work without this.");
     }
-    console.error("[ShaderMCP-LSP] Installing shader-ls via dotnet...");
+    console.error("[UnityAgent-LSP] Installing shader-ls via dotnet...");
     try {
       execSync("dotnet tool install --global shader-ls", {
         stdio: "pipe",
         timeout: 12e4
       });
-      console.error("[ShaderMCP-LSP] shader-ls installed successfully.");
+      console.error("[UnityAgent-LSP] shader-ls installed successfully.");
     } catch (err) {
       try {
         execSync("dotnet tool update --global shader-ls", {
           stdio: "pipe",
           timeout: 12e4
         });
-        console.error("[ShaderMCP-LSP] shader-ls updated successfully.");
+        console.error("[UnityAgent-LSP] shader-ls updated successfully.");
       } catch (updateErr) {
         throw new Error(`Failed to install shader-ls: ${err instanceof Error ? err.message : String(err)}
 Please install manually: dotnet tool install --global shader-ls`);
@@ -31063,7 +31063,7 @@ Please install manually: dotnet tool install --global shader-ls`);
       this.connection.sendRequest(import_node.InitializeRequest.type, initParams),
       new Promise((_, reject) => setTimeout(() => reject(new Error("LSP initialization timed out")), LSP_INIT_TIMEOUT))
     ]);
-    console.error(`[ShaderMCP-LSP] LSP initialized. Server: ${initResult.serverInfo?.name ?? "unknown"} ${initResult.serverInfo?.version ?? ""}`);
+    console.error(`[UnityAgent-LSP] LSP initialized. Server: ${initResult.serverInfo?.name ?? "unknown"} ${initResult.serverInfo?.version ?? ""}`);
     await this.connection.sendNotification(import_node.InitializedNotification.type, {});
   }
   /**
@@ -31195,7 +31195,7 @@ async function handleAIQuery(request) {
         permissionMode: "bypassPermissions",
         allowDangerouslySkipPermissions: true,
         mcpServers: {
-          "unity-mcp-tools": {
+          "unity-agent-tools": {
             command: "node",
             args: [serverPath]
           }
@@ -31919,7 +31919,7 @@ function registerEditorPlatformResource(server, bridge) {
 // build/index.js
 async function main() {
   const server = new McpServer({
-    name: "unity-mcp-tools",
+    name: "unity-agent-tools",
     version: "0.5.0"
   });
   const bridge = new UnityBridge("ws://localhost:8090");
@@ -31947,10 +31947,10 @@ async function main() {
     const id = msg.id;
     const params = msg.params;
     if (!id || !params?.prompt) {
-      console.error("[UnityMCP] Invalid AI query: missing id or prompt");
+      console.error("[UnityAgent] Invalid AI query: missing id or prompt");
       return;
     }
-    console.error(`[UnityMCP] AI query received (id=${id}): ${params.prompt.substring(0, 80)}...`);
+    console.error(`[UnityAgent] AI query received (id=${id}): ${params.prompt.substring(0, 80)}...`);
     try {
       const result = await handleAIQuery({
         prompt: params.prompt,
@@ -31975,11 +31975,11 @@ async function main() {
     }
   });
   bridge.connect().catch(() => {
-    console.error("[UnityMCP] Initial connection to Unity failed. Will retry automatically.");
+    console.error("[UnityAgent] Initial connection to Unity failed. Will retry automatically.");
   });
   const transport = new StdioServerTransport();
   await server.connect(transport);
-  console.error("[UnityMCP] MCP server started on stdio");
+  console.error("[UnityAgent] MCP server started on stdio");
   const cleanup = async () => {
     await lspClient.shutdown();
     bridge.disconnect();
@@ -31989,6 +31989,6 @@ async function main() {
   process.on("SIGTERM", cleanup);
 }
 main().catch((err) => {
-  console.error(`[UnityMCP] Fatal error: ${err}`);
+  console.error(`[UnityAgent] Fatal error: ${err}`);
   process.exit(1);
 });

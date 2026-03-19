@@ -9,7 +9,7 @@ using UnityEditor;
 using UnityEngine;
 using Debug = UnityEngine.Debug;
 
-namespace ShaderMCP.Editor
+namespace UnityAgent.Editor
 {
     /// <summary>
     /// Background WebSocket server (RFC 6455) on localhost:8090.
@@ -17,7 +17,7 @@ namespace ShaderMCP.Editor
     /// Registers handlers for both Shader tools and Error Solver tools.
     /// </summary>
     [InitializeOnLoad]
-    public static class UnityMCPServer
+    public static class UnityAgentServer
     {
         private const int DefaultPort = 8090;
         private const string WebSocketMagicGuid = "258EAFA5-E914-47DA-95CA-C5AB0DC85B11";
@@ -41,7 +41,7 @@ namespace ShaderMCP.Editor
         private static Process _mcpProcess;
         private static bool _mcpRunning;
 
-        static UnityMCPServer()
+        static UnityAgentServer()
         {
             RegisterHandlers();
             EditorApplication.update -= Update;
@@ -54,7 +54,7 @@ namespace ShaderMCP.Editor
             // Auto-restart after domain reload
             EditorApplication.delayCall += () =>
             {
-                if (SessionState.GetBool("UnityMCP_WasRunning", false))
+                if (SessionState.GetBool("UnityAgent_WasRunning", false))
                 {
                     StartServer();
                 }
@@ -63,7 +63,7 @@ namespace ShaderMCP.Editor
 
         private static void OnBeforeAssemblyReload()
         {
-            SessionState.SetBool("UnityMCP_WasRunning", _isRunning);
+            SessionState.SetBool("UnityAgent_WasRunning", _isRunning);
             StopMCPServer();
 
             try
@@ -149,11 +149,11 @@ namespace ShaderMCP.Editor
                     SocketOptionLevel.Socket, SocketOptionName.ReuseAddress, true);
                 _listener.Start();
                 _isRunning = true;
-                Debug.Log($"[UnityMCP] Server started on ws://localhost:{_port}");
+                Debug.Log($"[UnityAgent] Server started on ws://localhost:{_port}");
             }
             catch (Exception ex)
             {
-                Debug.LogError($"[UnityMCP] Failed to start server: {ex}");
+                Debug.LogError($"[UnityAgent] Failed to start server: {ex}");
             }
         }
 
@@ -183,11 +183,11 @@ namespace ShaderMCP.Editor
                     _listener.Stop();
                     _listener = null;
                 }
-                Debug.Log("[UnityMCP] Server stopped");
+                Debug.Log("[UnityAgent] Server stopped");
             }
             catch (Exception ex)
             {
-                Debug.LogError($"[UnityMCP] Error stopping server: {ex.Message}");
+                Debug.LogError($"[UnityAgent] Error stopping server: {ex.Message}");
             }
         }
 
@@ -224,18 +224,18 @@ namespace ShaderMCP.Editor
                 _mcpProcess.ErrorDataReceived += (sender, args) =>
                 {
                     if (!string.IsNullOrEmpty(args.Data))
-                        Debug.Log($"[UnityMCP] [MCP] {args.Data}");
+                        Debug.Log($"[UnityAgent] [MCP] {args.Data}");
                 };
 
                 _mcpProcess.Start();
                 _mcpProcess.BeginErrorReadLine();
                 _mcpRunning = true;
 
-                Debug.Log("[UnityMCP] MCP server process started");
+                Debug.Log("[UnityAgent] MCP server process started");
             }
             catch (Exception ex)
             {
-                Debug.LogWarning($"[UnityMCP] Failed to start MCP server: {ex.Message}. " +
+                Debug.LogWarning($"[UnityAgent] Failed to start MCP server: {ex.Message}. " +
                     "Ensure Node.js 18+ is installed and npx is in PATH.");
                 _mcpRunning = false;
             }
@@ -318,7 +318,7 @@ namespace ShaderMCP.Editor
             }
             catch (Exception ex)
             {
-                Debug.LogWarning($"[UnityMCP] Update error: {ex.Message}");
+                Debug.LogWarning($"[UnityAgent] Update error: {ex.Message}");
             }
         }
 
@@ -389,11 +389,11 @@ namespace ShaderMCP.Editor
 
                 client.ReceiveTimeout = 0;
                 _clients.Add(new ClientConnection { client = client, stream = stream });
-                Debug.Log($"[UnityMCP] Client connected (total: {_clients.Count})");
+                Debug.Log($"[UnityAgent] Client connected (total: {_clients.Count})");
             }
             catch (Exception ex)
             {
-                Debug.LogWarning($"[UnityMCP] Handshake failed: {ex.Message}");
+                Debug.LogWarning($"[UnityAgent] Handshake failed: {ex.Message}");
                 client.Close();
             }
         }

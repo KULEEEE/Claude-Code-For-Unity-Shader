@@ -2,7 +2,7 @@ using System;
 using System.Collections.Generic;
 using UnityEngine;
 
-namespace ShaderMCP.Editor
+namespace UnityAgent.Editor
 {
     #region Protocol Types
 
@@ -83,7 +83,7 @@ namespace ShaderMCP.Editor
             }
             catch (Exception ex)
             {
-                Debug.LogError($"[ShaderMCP] Error processing message: {ex}");
+                Debug.LogError($"[UnityAgent] Error processing message: {ex}");
                 return BuildErrorResponse(id ?? "unknown", -3, ex.Message);
             }
         }

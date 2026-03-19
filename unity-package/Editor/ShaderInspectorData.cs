@@ -1,6 +1,6 @@
 using System.Collections.Generic;
 
-namespace ShaderMCP.Editor
+namespace UnityAgent.Editor
 {
     /// <summary>
     /// Data models for the Shader Inspector window.

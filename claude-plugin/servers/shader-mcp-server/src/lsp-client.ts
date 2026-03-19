@@ -107,14 +107,14 @@ export class ShaderLspClient {
       this.process.on("exit", (code) => {
         if (!this.isShuttingDown) {
           console.error(
-            `[ShaderMCP-LSP] shader-ls exited with code ${code}. Will restart on next request.`
+            `[UnityAgent-LSP] shader-ls exited with code ${code}. Will restart on next request.`
           );
         }
         this.cleanup();
       });
 
       this.process.on("error", (err) => {
-        console.error(`[ShaderMCP-LSP] shader-ls process error: ${err.message}`);
+        console.error(`[UnityAgent-LSP] shader-ls process error: ${err.message}`);
         this.cleanup();
       });
 
@@ -130,7 +130,7 @@ export class ShaderLspClient {
   }
 
   private async autoInstall(): Promise<void> {
-    console.error("[ShaderMCP-LSP] shader-ls not found. Attempting auto-install...");
+    console.error("[UnityAgent-LSP] shader-ls not found. Attempting auto-install...");
 
     // Check if dotnet is available
     const dotnetCmd = process.platform === "win32" ? "where dotnet" : "which dotnet";
@@ -147,13 +147,13 @@ export class ShaderLspClient {
     }
 
     // Install shader-ls globally
-    console.error("[ShaderMCP-LSP] Installing shader-ls via dotnet...");
+    console.error("[UnityAgent-LSP] Installing shader-ls via dotnet...");
     try {
       execSync("dotnet tool install --global shader-ls", {
         stdio: "pipe",
         timeout: 120000,
       });
-      console.error("[ShaderMCP-LSP] shader-ls installed successfully.");
+      console.error("[UnityAgent-LSP] shader-ls installed successfully.");
     } catch (err) {
       // It might already be installed — try updating
       try {
@@ -161,7 +161,7 @@ export class ShaderLspClient {
           stdio: "pipe",
           timeout: 120000,
         });
-        console.error("[ShaderMCP-LSP] shader-ls updated successfully.");
+        console.error("[UnityAgent-LSP] shader-ls updated successfully.");
       } catch (updateErr) {
         throw new Error(
           `Failed to install shader-ls: ${err instanceof Error ? err.message : String(err)}\n` +
@@ -220,7 +220,7 @@ export class ShaderLspClient {
     ]);
 
     console.error(
-      `[ShaderMCP-LSP] LSP initialized. Server: ${initResult.serverInfo?.name ?? "unknown"} ${initResult.serverInfo?.version ?? ""}`
+      `[UnityAgent-LSP] LSP initialized. Server: ${initResult.serverInfo?.name ?? "unknown"} ${initResult.serverInfo?.version ?? ""}`
     );
 
     await this.connection.sendNotification(InitializedNotification.type, {});

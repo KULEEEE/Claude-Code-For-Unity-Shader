@@ -4,7 +4,7 @@ using System.Text;
 using UnityEditor;
 using UnityEngine;
 
-namespace ShaderMCP.Editor
+namespace UnityAgent.Editor
 {
     /// <summary>
     /// Unity Editor window that displays collected errors and provides
@@ -36,7 +36,7 @@ namespace ShaderMCP.Editor
         private float _splitRatio = 0.5f;
         private bool _isDraggingSplitter;
 
-        [MenuItem("Tools/Unity MCP/Error Solver")]
+        [MenuItem("Tools/Unity Agent/Error Solver")]
         public static void ShowWindow()
         {
             var window = GetWindow<ErrorSolverWindow>("Error Solver");
@@ -45,7 +45,7 @@ namespace ShaderMCP.Editor
 
         private void OnEnable()
         {
-            UnityMCPServer.EnsureRunning();
+            UnityAgentServer.EnsureRunning();
             ErrorCollector.OnErrorsChanged += OnErrorsChanged;
             RefreshErrors();
         }
@@ -174,8 +174,8 @@ namespace ShaderMCP.Editor
             GUI.color = oldColor;
 
             // Connection status
-            GUI.color = UnityMCPServer.IsClientConnected ? ErrorSolverStyles.SuccessColor : ErrorSolverStyles.DimText;
-            GUILayout.Label(UnityMCPServer.IsClientConnected ? "● AI Connected" : "● AI Offline",
+            GUI.color = UnityAgentServer.IsClientConnected ? ErrorSolverStyles.SuccessColor : ErrorSolverStyles.DimText;
+            GUILayout.Label(UnityAgentServer.IsClientConnected ? "● AI Connected" : "● AI Offline",
                 EditorStyles.toolbarButton, GUILayout.Width(90));
             GUI.color = oldColor;
 
