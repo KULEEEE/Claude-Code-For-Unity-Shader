@@ -1,17 +1,17 @@
-# Unity Shader MCP Tools
+# Unity Agent
 
-**Unity Editor 내장 AI 셰이더 개발 도구 — MCP 기반으로 AI 코딩 어시스턴트와 연결**
+**AI-powered Unity Editor tools — Error auto-fix & Shader analysis via Claude Code**
 
 ```
 ┌──────────────────────────────────┐
 │        Unity Editor              │
 │  ┌────────────────────────────┐  │     WebSocket      ┌──────────────┐     MCP(stdio)     ┌─────────────┐
-│  │   Shader Inspector Window  │  │◄─────────────────► │  Node.js     │◄──────────────────►│  AI Coding  │
-│  │  (Shaders│Materials│AI Chat)│  │   localhost:8090   │  MCP Server  │                    │  Assistant  │
+│  │   Error Solver             │  │◄─────────────────► │  Node.js     │◄──────────────────►│  AI Coding  │
+│  │   Shader Inspector         │  │   localhost:8090   │  MCP Server  │                    │  Assistant  │
 │  └────────────────────────────┘  │                    └──────────────┘                    └─────────────┘
-│  ┌────────────────────────────┐  │                           ▲
-│  │   Server Window            │  │                           │ stdio
-│  └────────────────────────────┘  │                    ┌──────┴───────┐
+│                                  │                           ▲
+│  Server auto-starts when any     │                           │ stdio
+│  tool window opens               │                    ┌──────┴───────┐
 └──────────────────────────────────┘                    │  shader-ls   │
                                                         │  (LSP Server)│
                                                         └──────────────┘
@@ -19,49 +19,81 @@
 
 ---
 
+## Features
+
+### Error Solver
+Unity 에러를 자동으로 수집하고, AI가 분석 + 코드 수정까지 해주는 도구.
+
+- **실시간 에러 수집** — `Application.logMessageReceived` + `CompilationPipeline` 훅
+- **Solve 버튼** — 에러 선택 후 클릭하면 AI가 소스 읽고 → 원인 분석 → 코드 수정
+- **스트리밍 응답** — AI 작업 진행 상황 실시간 표시
+- **소스 바로가기** — 에러 발생 파일/라인 클릭으로 IDE 이동
+
+### Shader Inspector
+셰이더 분석, 머티리얼 검사, AI 채팅이 통합된 에디터 윈도우.
+
+- **Shaders 탭** — 셰이더 목록, 컴파일, 배리언트 분석, AI 분석
+- **Materials 탭** — 머티리얼 목록, 프로퍼티/키워드 조회
+- **AI Chat 탭** — 셰이더 컨텍스트 기반 자유 대화
+- **Include Graph** — #include 의존성 그래프 시각화
+
+---
+
 ## Requirements
 
-- **Unity** 2021.3 LTS or higher (Unity 6.0+ recommended)
+- **Unity** 2021.3 LTS 이상
 - **Node.js** 18+
-- **Claude Code** installed and authenticated (AI Chat / AI Analysis features use the [Claude Agent SDK](https://www.npmjs.com/package/@anthropic-ai/claude-agent-sdk) internally)
-- **AI Coding Assistant** (any MCP-compatible client for direct tool access):
-  - [Claude Code](https://docs.anthropic.com/en/docs/claude-code)
-  - [Codex CLI](https://github.com/openai/codex)
-  - [OpenCode](https://github.com/opencode-ai/opencode)
-  - [Gemini CLI](https://github.com/google-gemini/gemini-cli)
-  - [Cursor](https://cursor.com)
-  - Any MCP-compatible client
-- **.NET 7.0+ SDK** (optional, for LSP features — [download](https://dotnet.microsoft.com/download))
+- **Claude Code** 설치 및 인증 (Solve 기능은 [Claude Agent SDK](https://www.npmjs.com/package/@anthropic-ai/claude-agent-sdk) 사용)
+- **.NET 7.0+ SDK** (선택, LSP 기능용)
 
 ---
 
 ## Installation
 
-### Step 1: Install Unity Package
+### 방법 1: Git URL (권장)
 
-Open Unity Editor, go to Window > Package Manager, click `+` > **Add package from git URL**, and enter:
+Unity Editor → Window > Package Manager → `+` → **Add package from git URL**:
 ```
-https://github.com/KULEEEE/Claude-Code-For-Unity-Shader.git?path=unity-package
+https://github.com/KULEEEE/Claude-Code-For-Unity.git?path=unity-package
 ```
 
-Or install from disk:
-Unity Package Manager > `+` > **Add package from disk** > `unity-package/package.json`
+### 방법 2: 로컬 폴더
 
-### Step 2: Configure MCP Server
+ZIP 다운로드 후 `unity-package/` 폴더를 Unity 프로젝트의 `Packages/UnityAgent/`에 복사:
+```
+Packages/
+  UnityAgent/
+    package.json
+    Editor/
+      UnityAgentServer.cs
+      ErrorCollector.cs
+      ErrorSolverWindow.cs
+      ...
+    Runtime/
+      AssemblyInfo.cs
+```
 
-The MCP server is published on npm as [`unity-shader-mcp`](https://www.npmjs.com/package/unity-shader-mcp). No build required — just add the config for your AI assistant:
+### 방법 3: 디스크에서 추가
 
-#### Claude Code
+Package Manager → `+` → **Add package from disk** → `unity-package/package.json` 선택
 
-Add to `.mcp.json` (project root or `~/.claude/.mcp.json`):
+---
+
+## MCP Server 설정
+
+npm에 퍼블리시된 [`unity-agent-tools`](https://www.npmjs.com/package/unity-agent-tools) 패키지를 사용합니다. AI 어시스턴트 설정에 추가하세요.
+
+### Claude Code
+
+`.mcp.json` (프로젝트 루트 또는 `~/.claude/.mcp.json`):
 
 **macOS / Linux:**
 ```json
 {
   "mcpServers": {
-    "unity-shader": {
+    "unity-agent": {
       "command": "npx",
-      "args": ["-y", "unity-shader-mcp"]
+      "args": ["-y", "unity-agent-tools"]
     }
   }
 }
@@ -71,312 +103,179 @@ Add to `.mcp.json` (project root or `~/.claude/.mcp.json`):
 ```json
 {
   "mcpServers": {
-    "unity-shader": {
+    "unity-agent": {
       "command": "cmd",
-      "args": ["/c", "npx", "-y", "unity-shader-mcp"]
+      "args": ["/c", "npx", "-y", "unity-agent-tools"]
     }
   }
 }
 ```
 
-#### OpenCode
+### Cursor
 
-Add to `opencode.json` (project root or `~/.config/opencode/opencode.json`):
-
+`.cursor/mcp.json`:
 ```json
 {
-  "$schema": "https://opencode.ai/config.json",
+  "mcpServers": {
+    "unity-agent": {
+      "command": "npx",
+      "args": ["-y", "unity-agent-tools"]
+    }
+  }
+}
+```
+
+### OpenCode
+
+`opencode.json`:
+```json
+{
   "mcp": {
-    "unity-shader": {
+    "unity-agent": {
       "type": "local",
-      "command": ["npx", "-y", "unity-shader-mcp"],
+      "command": ["npx", "-y", "unity-agent-tools"],
       "enabled": true
     }
   }
 }
 ```
 
-#### Gemini CLI
-
-Add to `settings.json` (`~/.gemini/settings.json` or `.gemini/settings.json`):
-
-```json
-{
-  "mcpServers": {
-    "unity-shader": {
-      "command": "npx",
-      "args": ["-y", "unity-shader-mcp"]
-    }
-  }
-}
-```
-
-#### Codex CLI
-
-Add to `config.toml` (`~/.codex/config.toml` or `.codex/config.toml` in project root):
-
-**macOS / Linux:**
-```toml
-[mcp_servers.unity-shader]
-command = "npx"
-args = ["-y", "unity-shader-mcp"]
-```
-
-**Windows:**
-```toml
-[mcp_servers.unity-shader]
-command = "cmd"
-args = ["/c", "npx", "-y", "unity-shader-mcp"]
-```
-
-#### Cursor
-
-Add to `.cursor/mcp.json` (project root):
-
-```json
-{
-  "mcpServers": {
-    "unity-shader": {
-      "command": "npx",
-      "args": ["-y", "unity-shader-mcp"]
-    }
-  }
-}
-```
-
-> **Auto-update**: Since the server runs via `npx`, you always get the latest version automatically. No manual update needed.
-
-### Step 3: Verify Connection
-
-1. Open **Tools > Shader MCP > Server Window** in Unity Editor
-2. Click **Start Server**
-3. Test tool calls from your AI assistant:
-
-```
-"Show me the list of shaders in the project"
-```
-
 ---
 
-## Shader Inspector (Unity Editor GUI)
+## Usage
 
-The Unity package includes a built-in **Shader Inspector** window with AI integration.
+### Error Solver
 
-Open via **Tools > Shader MCP > Shader Inspector**
+1. **Tools** → **Unity Agent** → **Error Solver** 열기 (서버 자동 시작)
+2. Unity에서 에러 발생 → 목록에 자동 표시
+3. 에러 선택 → **Solve** 클릭
+4. AI가 자동으로:
+   - 관련 소스 파일 읽기
+   - 원인 분석
+   - 코드 수정
+   - 결과 설명
 
-### Main Toolbar
+### Shader Inspector
 
-| Element | Description |
-|---------|-------------|
-| **Shader Inspector** | Window title |
-| **Lang** | Response language selector — **Auto**, 한국어, English, 日本語, 中文. Applies to all AI features (AI Chat and AI Analysis) |
-| **Refresh All** | Refresh all tabs |
+1. **Tools** → **Unity Agent** → **Shader Inspector** 열기
+2. Shaders 탭에서 셰이더 선택
+3. 로컬 분석 (Compile, Variants, Properties) 또는 AI 분석 실행
+4. AI Chat 탭에서 셰이더 관련 자유 질문
 
-### Tabs
+### AI 어시스턴트에서 직접 사용
 
-| Tab | Description |
-|-----|-------------|
-| **Shaders** | Browse shaders with search/sort/filter, view details, run local analysis (compile, variants, properties, code) and AI analysis (error analysis, optimization, explain, diagnose) |
-| **Materials** | Browse materials grouped by shader, view properties/keywords, navigate to shader |
-| **Pipeline** | Read-only dashboard of render pipeline, quality settings, and platform info |
-| **Logs** | Shader-related log viewer with severity filter and AI error analysis |
-| **AI Chat** | Free-form chat with Claude about shaders, auto-attaches selected shader as context |
-
-### AI Features
-
-#### AI Chat
-- Free-form conversation about shaders with Claude
-- Auto-attaches selected shader as context
-- **Markdown rendering** — headers, bold, italic, code blocks with copy button, lists, blockquotes
-- **Quick presets** for common queries (Optimize, Explain errors, etc.)
-- **Conversation history** — multi-turn context (last 10 messages)
-
-#### AI Analysis (Shaders Tab)
-- **Error Analysis** — Analyze compilation errors and suggest fixes
-- **Optimize** — Performance optimization suggestions with code examples
-- **Explain Code** — Non-programmer-friendly explanation of shader behavior
-- **Diagnose** — Comprehensive diagnostic report with severity levels
-- Results rendered in **Markdown** format
-
-#### Real-time Progress Status
-During AI queries, the UI shows real-time progress instead of a static "thinking" message:
-- `⏳ Claude Code 작업 시작...` — Query initiated
-- `⏳ Claude Code 작업 중...` — Processing
-- `⚙️ compile_shader` — Using MCP tools (shader compilation, variant analysis, etc.)
-- `⚙️ analyze_shader_variants (5s)` — Tool progress with elapsed time
-
-The built-in AI uses the [Claude Agent SDK](https://www.npmjs.com/package/@anthropic-ai/claude-agent-sdk) which automatically has access to all shader MCP tools (`compile_shader`, `analyze_shader_variants`, `get_shader_code`, etc.), enabling Claude to actively inspect your project during analysis.
-
-### Other Features
-
-- **Drag & drop** shaders/materials into the window
-- **Basic analysis** runs locally in Unity (instant)
-- **Cross-tab navigation** (e.g., "Go to Shader" from Materials tab)
-
----
-
-## Usage Examples
-
-### Shader Analysis
+MCP 설정 후 AI 어시스턴트에서 자연어로 요청:
 ```
-"Analyze the variant count of this shader"
+"Unity 프로젝트에서 에러 목록 보여줘"
 
-"Compile Character.shader and check for errors"
+"Assets/Scripts/Player.cs 파일 읽어줘"
+
+"이 셰이더 컴파일하고 에러 확인해줘"
+
+"프로젝트 셰이더 목록 보여줘"
 ```
-
-### Optimization
-```
-"Find areas to optimize for mobile"
-
-"Find shaders with too many variants"
-```
-
-### Inspection
-```
-"Show me the shader properties used by this material"
-
-"Tell me the current render pipeline settings"
-```
-
-### LSP Code Intelligence
-```
-"What does saturate() do?" (hover on a function)
-
-"Show completions at line 15, column 8 of this shader"
-
-"Show the signature help for lerp()"
-```
-
-### Slash Commands
-
-| Command | Description |
-|---------|-------------|
-| `/shader` | Interactive tool menu |
-| `/shader-help` | Full project analysis |
-| `/shader-list` | List shaders |
-| `/shader-compile` | Compile shader |
-| `/shader-analyze` | Analyze variants |
-| `/shader-code` | View source code |
-| `/shader-props` | View properties |
-| `/material-info` | Material info |
-| `/shader-logs` | Console logs |
-| `/shader-status` | Check connection status |
-| `/shader-hover` | Symbol hover info (LSP) |
-| `/shader-completion` | Code completions (LSP) |
-| `/shader-signature` | Function signature help (LSP) |
-| `/shader-diagnostics` | Shader diagnostics (LSP) |
 
 ---
 
 ## Tools
 
+### Error Solver Tools
+
 | Tool | Description |
 |------|-------------|
-| `compile_shader` | Compile shader and return errors/warnings |
-| `analyze_shader_variants` | Analyze keyword combinations and variant count |
-| `get_shader_properties` | List shader properties |
-| `get_shader_code` | Read shader source code (with include resolution) |
-| `get_material_info` | Get material details |
-| `list_shaders` | List project shaders |
-| `get_shader_logs` | Get shader-related console logs |
-| `shader_hover` | Get type/documentation info for a symbol (LSP) |
-| `shader_completion` | Get code completion suggestions (LSP) |
-| `shader_signature_help` | Get function signature help (LSP) |
-| `shader_diagnostics` | Get shader diagnostics (LSP, limited) |
+| `get_unity_errors` | Unity 콘솔 에러/경고 조회 |
+| `read_project_file` | Unity 프로젝트 파일 읽기 |
+| `write_project_file` | Unity 프로젝트 파일 쓰기 (자동 recompile) |
+| `list_project_files` | 프로젝트 파일 목록 조회 |
 
-## Resources
+### Shader Tools
+
+| Tool | Description |
+|------|-------------|
+| `compile_shader` | 셰이더 컴파일, 에러/경고 반환 |
+| `analyze_shader_variants` | 키워드 조합 및 배리언트 수 분석 |
+| `get_shader_properties` | 셰이더 프로퍼티 목록 |
+| `get_shader_code` | 셰이더 소스 코드 (include 해석 포함) |
+| `get_material_info` | 머티리얼 상세 정보 |
+| `list_shaders` | 프로젝트 셰이더 목록 |
+
+### LSP Tools
+
+| Tool | Description |
+|------|-------------|
+| `shader_hover` | 심볼 타입/문서 정보 |
+| `shader_completion` | 코드 자동완성 |
+| `shader_signature_help` | 함수 시그니처 도움말 |
+| `shader_diagnostics` | 셰이더 진단 |
+
+### Resources
 
 | Resource URI | Description |
 |-------------|-------------|
-| `unity://pipeline/info` | Render pipeline info |
-| `unity://shader/includes` | Include file list |
-| `unity://shader/keywords` | Shader keyword list |
-| `unity://editor/platform` | Build target and platform info |
-
----
-
-## LSP Code Intelligence (shader-ls)
-
-The MCP server integrates [shader-language-server](https://github.com/shader-ls/shader-language-server) (shader-ls) to provide IDE-level code intelligence for ShaderLab/HLSL:
-
-- **Hover**: Type and documentation info for functions, variables, keywords
-- **Completion**: Context-aware code completion suggestions
-- **Signature Help**: Parameter info when inside function calls
-- **Diagnostics**: Placeholder for future shader-ls support (use `compile_shader` for now)
-
-### How it works
-
-- **Lazy startup**: shader-ls only launches on the first LSP tool call. Existing tools are unaffected.
-- **Auto-install**: If shader-ls is not found, it is automatically installed via `dotnet tool install --global shader-ls` (requires .NET 7.0+ SDK).
-- **Crash recovery**: If shader-ls crashes, it restarts automatically on the next request.
-
-### Prerequisites
-
-| Requirement | Required for |
-|-------------|-------------|
-| .NET 7.0+ SDK | LSP tools only |
-| Unity Editor | Unity tools only |
-
-> LSP tools and Unity tools are independent. If .NET is not installed, only LSP tools will show an error — all other tools work normally.
-
----
-
-## Troubleshooting
-
-### Server won't start
-- Check if port 8090 is already in use
-- Port can be changed in the Server Window
-
-### Can't connect from AI assistant
-- Verify the server is in Running state in Unity Editor
-- Test connection directly with `wscat -c ws://localhost:8090`
-
-### Disconnected after Domain Reload
-- The MCP server attempts auto-reconnect every 3 seconds
-- To prevent disconnections, disable Reload Domain in Enter Play Mode Settings
-
-### ShaderUtil API warnings
-- Some internal APIs may be restricted in certain Unity versions
-- Reflection fallback is applied automatically
-- More stable on Unity 6.0+ with public APIs
+| `unity://pipeline/info` | 렌더 파이프라인 정보 |
+| `unity://shader/includes` | Include 파일 목록 |
+| `unity://shader/keywords` | 셰이더 키워드 목록 |
+| `unity://editor/platform` | 빌드 타겟 및 플랫폼 정보 |
 
 ---
 
 ## Architecture
 
-### Unity C# Package (`unity-package/`)
-- **ShaderMCPServer.cs**: TcpListener-based WebSocket server (RFC 6455) + EditorWindow UI
-- **ShaderAnalyzer.cs**: Shader analysis (listing, compilation, variants, properties, source code)
-- **MaterialInspector.cs**: Material information gathering
-- **PipelineDetector.cs**: Render pipeline detection (avoids hard URP/HDRP dependencies via reflection)
-- **ShaderCompileWatcher.cs**: Shader-related log filtering
-- **MessageHandler.cs**: JSON message routing
-- **JsonHelper.cs**: Supplements for JsonUtility limitations
-- **ShaderInspectorWindow.cs**: Shader Inspector EditorWindow with tabbed UI and global language selector
-- **AIRequestHandler.cs**: AI query routing with streaming support (Unity → MCP → Agent SDK → Claude)
-- **MarkdownRenderer.cs**: Markdown → IMGUI rich text renderer for AI responses
-- **Tabs/**: ShaderBrowser, MaterialBrowser, PipelineDashboard, ShaderLogs, AIChat
+```
+Unity Editor (C#)                    Node.js MCP Server
+├── UnityAgentServer.cs              ├── index.ts (entry point)
+│   WebSocket server (:8090)         ├── unity-bridge.ts (WebSocket client)
+│   Auto-start on tool open          ├── ai-handler.ts (Claude Agent SDK)
+├── ErrorCollector.cs                ├── lsp-client.ts (shader-ls)
+│   Console log capture              ├── tools/
+├── ErrorSolverWindow.cs             │   ├── get-unity-errors.ts
+│   Error list + Solve button        │   ├── read-project-file.ts
+├── ShaderInspectorWindow.cs         │   ├── write-project-file.ts
+│   Shader/Material/AI tabs          │   ├── list-project-files.ts
+├── ShaderAnalyzer.cs                │   ├── shader-compile.ts
+├── MaterialInspector.cs             │   ├── shader-analyze.ts
+├── AIRequestHandler.cs              │   └── ... (13 tools total)
+├── MarkdownRenderer.cs              └── resources/ (4 resources)
+└── JsonHelper.cs
+```
 
-### Node.js MCP Server (`claude-plugin/servers/shader-mcp-server/`)
-- **unity-bridge.ts**: Unity WebSocket client (auto-reconnect, UUID matching, AI/status message relay)
-- **lsp-client.ts**: ShaderLab LSP client (wraps [shader-ls](https://github.com/shader-ls/shader-language-server), auto-install)
-- **ai-handler.ts**: Claude Agent SDK integration — uses `query()` async generator with MCP tools and real-time progress status
-- **tools/**: MCP Tool definitions (7 Unity tools + 4 LSP tools)
-- **resources/**: MCP Resource definitions (4 resources)
-- **index.ts**: McpServer + StdioServerTransport entry point
+### 통신 흐름
 
-### Unity Version Compatibility
-- `#if UNITY_6000_0_OR_NEWER`: Unity 6.0-specific APIs (`shader.keywordSpace`, etc.)
-- Fallback: ShaderUtil internal API reflection + try-catch
+**Error Solver (Solve 버튼):**
+```
+Error Solver UI → AIRequestHandler → WebSocket → MCP Server
+→ Claude Agent SDK → Claude API → 파일 읽기/수정 → 결과 스트리밍
+```
+
+**AI 어시스턴트 직접 사용:**
+```
+AI Assistant → MCP(stdio) → MCP Server → WebSocket → Unity Editor
+→ 에러 조회 / 파일 읽기 / 셰이더 분석 → 응답
+```
+
+---
+
+## Troubleshooting
+
+### AI Offline 표시
+- 툴 창을 닫았다 다시 열어보세요 (서버 재시작)
+- Node.js 18+가 설치되어 있는지 확인
+- `npx -y unity-agent-tools` 가 터미널에서 실행되는지 확인
+
+### 에러 목록이 안 보임
+- **Clear** 버튼으로 기존 에러 초기화 후 새 에러 발생시키기
+- **Refresh** 버튼 클릭
+
+### Domain Reload 후 연결 끊김
+- MCP 서버가 3초마다 자동 재연결 시도
+- Enter Play Mode Settings에서 Reload Domain 비활성화하면 방지 가능
+
+### 포트 충돌
+- 기본 포트: 8090
+- 다른 프로세스가 사용 중이면 Unity 콘솔에 에러 표시
 
 ---
 
-## Contributing
+## License
 
-1. Fork this repository
-2. Create a feature branch (`git checkout -b feature/amazing-feature`)
-3. Commit your changes (`git commit -m 'Add amazing feature'`)
-4. Push to the branch (`git push origin feature/amazing-feature`)
-5. Open a Pull Request
-
----
+MIT
