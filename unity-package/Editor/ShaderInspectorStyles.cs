@@ -13,6 +13,27 @@ namespace UnityAgent.Editor
         public const int VariantWarningThreshold = 128;
         public const int VariantDangerThreshold = 1024;
 
+        // Reset all cached styles on domain reload
+        [UnityEditor.Callbacks.DidReloadScripts]
+        private static void OnScriptsReloaded()
+        {
+            _tabNormal = null;
+            _tabSelected = null;
+            _headerLabel = null;
+            _statusBar = null;
+            _resultArea = null;
+            _listItem = null;
+            _listItemSelected = null;
+            _sectionHeader = null;
+            _aiResponseArea = null;
+            _chatBubbleUser = null;
+            _chatBubbleAI = null;
+            _codeArea = null;
+            _markdownText = null;
+            _codeBlockContainer = null;
+            _codeBlockText = null;
+        }
+
         // Colors
         public static readonly Color GreenStatus = new Color(0.2f, 0.8f, 0.2f);
         public static readonly Color YellowStatus = new Color(0.9f, 0.8f, 0.1f);
