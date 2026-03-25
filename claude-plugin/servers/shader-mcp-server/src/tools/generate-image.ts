@@ -4,13 +4,28 @@ import { UnityBridge } from "../unity-bridge.js";
 import { generateImage } from "../gemini-handler.js";
 
 /**
- * Stores the latest Gemini settings received from Unity.
- * Updated each time an ai/query message arrives with gemini config.
+ * Stores the latest Gemini settings.
+ * In subprocess mode: reads from environment variables (set by ai-handler).
+ * In main process mode: updated via ai/query messages from Unity.
  */
 export const geminiConfig = {
-  apiKey: "",
-  model: "gemini-2.5-flash-preview-image-generation",
-  referenceImage: undefined as string | undefined,
+  get apiKey(): string {
+    return process.env.GEMINI_API_KEY || this._apiKey;
+  },
+  set apiKey(v: string) { this._apiKey = v; },
+  _apiKey: "",
+
+  get model(): string {
+    return process.env.GEMINI_MODEL || this._model;
+  },
+  set model(v: string) { this._model = v; },
+  _model: "gemini-2.5-flash-preview-image-generation",
+
+  get referenceImage(): string | undefined {
+    return process.env.GEMINI_REFERENCE_IMAGE || this._referenceImage;
+  },
+  set referenceImage(v: string | undefined) { this._referenceImage = v; },
+  _referenceImage: undefined as string | undefined,
 };
 
 export function registerGenerateImageTool(

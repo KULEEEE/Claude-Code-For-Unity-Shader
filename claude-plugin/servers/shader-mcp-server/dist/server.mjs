@@ -31188,6 +31188,13 @@ async function handleAIQuery(request) {
     let resultText = "";
     request.onStatus?.("\u23F3 Claude Code \uC791\uC5C5 \uC2DC\uC791...");
     const serverPath = join(dirname(fileURLToPath(import.meta.url)), "server.mjs");
+    const mcpEnv = { ...process.env };
+    if (request.geminiApiKey)
+      mcpEnv.GEMINI_API_KEY = request.geminiApiKey;
+    if (request.geminiModel)
+      mcpEnv.GEMINI_MODEL = request.geminiModel;
+    if (request.referenceImage)
+      mcpEnv.GEMINI_REFERENCE_IMAGE = request.referenceImage;
     for await (const msg of query({
       prompt: fullPrompt,
       options: {
@@ -31197,7 +31204,8 @@ async function handleAIQuery(request) {
         mcpServers: {
           "unity-agent-tools": {
             command: "node",
-            args: [serverPath]
+            args: [serverPath],
+            env: mcpEnv
           }
         }
       }
@@ -31881,9 +31889,27 @@ async function generateImage(request) {
 
 // build/tools/generate-image.js
 var geminiConfig = {
-  apiKey: "",
-  model: "gemini-2.5-flash-preview-image-generation",
-  referenceImage: void 0
+  get apiKey() {
+    return process.env.GEMINI_API_KEY || this._apiKey;
+  },
+  set apiKey(v) {
+    this._apiKey = v;
+  },
+  _apiKey: "",
+  get model() {
+    return process.env.GEMINI_MODEL || this._model;
+  },
+  set model(v) {
+    this._model = v;
+  },
+  _model: "gemini-2.5-flash-preview-image-generation",
+  get referenceImage() {
+    return process.env.GEMINI_REFERENCE_IMAGE || this._referenceImage;
+  },
+  set referenceImage(v) {
+    this._referenceImage = v;
+  },
+  _referenceImage: void 0
 };
 function registerGenerateImageTool(server, bridge) {
   server.tool("generate_image", "Generate an image using Google's Nano Banana (Gemini Image Generation). Use this when the user asks to create, generate, or make an image, texture, sprite, icon, or visual asset. The generated image will be displayed in the Unity Editor's AI Chat window where the user can save it to their project. You should describe what you're generating and call this tool with a detailed prompt.", {
@@ -32125,6 +32151,9 @@ async function main() {
         context: params.context ?? params.shaderContext,
         language: params.language,
         projectPath: params.projectPath,
+        geminiApiKey: params.geminiApiKey,
+        geminiModel: params.geminiModel,
+        referenceImage: params.referenceImage,
         onChunk: (chunk) => {
           bridge.sendRaw({ method: "ai/chunk", id, chunk });
         },

@@ -108,6 +108,9 @@ async function main(): Promise<void> {
         context: params.context ?? params.shaderContext,
         language: params.language,
         projectPath: params.projectPath,
+        geminiApiKey: params.geminiApiKey,
+        geminiModel: params.geminiModel,
+        referenceImage: params.referenceImage,
         onChunk: (chunk: string) => {
           bridge.sendRaw({ method: "ai/chunk", id, chunk });
         },
