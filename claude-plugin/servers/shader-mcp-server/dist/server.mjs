@@ -31188,13 +31188,14 @@ async function handleAIQuery(request) {
     let resultText = "";
     request.onStatus?.("\u23F3 Claude Code \uC791\uC5C5 \uC2DC\uC791...");
     const serverPath = join(dirname(fileURLToPath(import.meta.url)), "server.mjs");
-    const mcpEnv = { ...process.env };
     if (request.geminiApiKey)
-      mcpEnv.GEMINI_API_KEY = request.geminiApiKey;
+      process.env.GEMINI_API_KEY = request.geminiApiKey;
     if (request.geminiModel)
-      mcpEnv.GEMINI_MODEL = request.geminiModel;
+      process.env.GEMINI_MODEL = request.geminiModel;
     if (request.referenceImage)
-      mcpEnv.GEMINI_REFERENCE_IMAGE = request.referenceImage;
+      process.env.GEMINI_REFERENCE_IMAGE = request.referenceImage;
+    else
+      delete process.env.GEMINI_REFERENCE_IMAGE;
     for await (const msg of query({
       prompt: fullPrompt,
       options: {
@@ -31204,8 +31205,7 @@ async function handleAIQuery(request) {
         mcpServers: {
           "unity-agent-tools": {
             command: "node",
-            args: [serverPath],
-            env: mcpEnv
+            args: [serverPath]
           }
         }
       }
@@ -32107,7 +32107,7 @@ function registerEditorPlatformResource(server, bridge) {
 async function main() {
   const server = new McpServer({
     name: "unity-agent-tools",
-    version: "0.7.1"
+    version: "0.7.2"
   });
   const bridge = new UnityBridge("ws://localhost:8090");
   const lspClient = new ShaderLspClient();

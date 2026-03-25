@@ -52,11 +52,11 @@ export async function handleAIQuery(request: AIRequest): Promise<AIResponse> {
       "server.mjs"
     );
 
-    // Pass Gemini config as env vars so the subprocess can access them
-    const mcpEnv: Record<string, string> = { ...process.env } as Record<string, string>;
-    if (request.geminiApiKey) mcpEnv.GEMINI_API_KEY = request.geminiApiKey;
-    if (request.geminiModel) mcpEnv.GEMINI_MODEL = request.geminiModel;
-    if (request.referenceImage) mcpEnv.GEMINI_REFERENCE_IMAGE = request.referenceImage;
+    // Set Gemini config in process.env so child processes inherit them
+    if (request.geminiApiKey) process.env.GEMINI_API_KEY = request.geminiApiKey;
+    if (request.geminiModel) process.env.GEMINI_MODEL = request.geminiModel;
+    if (request.referenceImage) process.env.GEMINI_REFERENCE_IMAGE = request.referenceImage;
+    else delete process.env.GEMINI_REFERENCE_IMAGE;
 
     for await (const msg of query({
       prompt: fullPrompt,
@@ -68,7 +68,6 @@ export async function handleAIQuery(request: AIRequest): Promise<AIResponse> {
           "unity-agent-tools": {
             command: "node",
             args: [serverPath],
-            env: mcpEnv,
           },
         },
       },
