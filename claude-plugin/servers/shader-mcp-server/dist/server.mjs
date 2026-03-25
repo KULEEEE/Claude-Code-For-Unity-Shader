@@ -32130,7 +32130,7 @@ function registerEditorPlatformResource(server, bridge) {
 async function main() {
   const server = new McpServer({
     name: "unity-agent-tools",
-    version: "0.7.4"
+    version: "0.7.5"
   });
   const bridge = new UnityBridge("ws://localhost:8090");
   const lspClient = new ShaderLspClient();
@@ -32161,11 +32161,23 @@ async function main() {
       console.error("[UnityAgent] Invalid AI query: missing id or prompt");
       return;
     }
+    let refImageData;
+    if (params.referenceImagePath) {
+      try {
+        const { readFileSync: readFileSync3 } = await import("fs");
+        refImageData = readFileSync3(params.referenceImagePath, "utf-8");
+        console.error(`[NanoBanana] Reference image loaded from ${params.referenceImagePath}`);
+      } catch (e) {
+        console.error(`[NanoBanana] Failed to read reference image: ${e}`);
+      }
+    } else if (params.referenceImage) {
+      refImageData = params.referenceImage;
+    }
     if (params.geminiApiKey) {
       geminiConfig.apiKey = params.geminiApiKey;
       geminiConfig.model = params.geminiModel || geminiConfig.model;
-      geminiConfig.referenceImage = params.referenceImage || void 0;
-      console.error(`[NanoBanana] Config updated: model=${geminiConfig.model}, hasRef=${!!geminiConfig.referenceImage}`);
+      geminiConfig.referenceImage = refImageData || void 0;
+      console.error(`[NanoBanana] Config updated: model=${geminiConfig.model}, hasRef=${!!refImageData}`);
     }
     console.error(`[UnityAgent] AI query received (id=${id}): ${params.prompt.substring(0, 80)}...`);
     try {
@@ -32176,7 +32188,7 @@ async function main() {
         projectPath: params.projectPath,
         geminiApiKey: params.geminiApiKey,
         geminiModel: params.geminiModel,
-        referenceImage: params.referenceImage,
+        referenceImage: refImageData,
         onChunk: (chunk) => {
           bridge.sendRaw({ method: "ai/chunk", id, chunk });
         },

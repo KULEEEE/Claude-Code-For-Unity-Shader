@@ -93,10 +93,16 @@ namespace UnityAgent.Editor
                     !string.IsNullOrEmpty(geminiModel) ? geminiModel : "gemini-2.5-flash-image");
             }
 
-            // Reference image (base64) if set
+            // Reference image: save to temp file and pass path (base64 too large for WebSocket)
             string refImageBase64 = GetReferenceImageBase64();
             if (!string.IsNullOrEmpty(refImageBase64))
-                msgBuilder.Key("referenceImage").Value(refImageBase64);
+            {
+                string tempPath = System.IO.Path.Combine(
+                    System.IO.Path.GetTempPath(),
+                    $"unity-agent-ref-{id}.b64");
+                System.IO.File.WriteAllText(tempPath, refImageBase64);
+                msgBuilder.Key("referenceImagePath").Value(tempPath);
+            }
 
             msgBuilder.EndObject();
             string message = msgBuilder.ToString();

@@ -35,7 +35,7 @@ import { registerEditorPlatformResource } from "./resources/editor-platform.js";
 async function main(): Promise<void> {
   const server = new McpServer({
     name: "unity-agent-tools",
-    version: "0.7.4",
+    version: "0.7.5",
   });
 
   const bridge = new UnityBridge("ws://localhost:8090");
@@ -83,6 +83,7 @@ async function main(): Promise<void> {
       geminiApiKey?: string;
       geminiModel?: string;
       referenceImage?: string;
+      referenceImagePath?: string;
     } | undefined;
 
     if (!id || !params?.prompt) {
@@ -91,11 +92,25 @@ async function main(): Promise<void> {
     }
 
     // Update Gemini config from Unity settings
+    // Load reference image from temp file if path provided
+    let refImageData: string | undefined;
+    if (params.referenceImagePath) {
+      try {
+        const { readFileSync } = await import("fs");
+        refImageData = readFileSync(params.referenceImagePath, "utf-8");
+        console.error(`[NanoBanana] Reference image loaded from ${params.referenceImagePath}`);
+      } catch (e) {
+        console.error(`[NanoBanana] Failed to read reference image: ${e}`);
+      }
+    } else if (params.referenceImage) {
+      refImageData = params.referenceImage;
+    }
+
     if (params.geminiApiKey) {
       geminiConfig.apiKey = params.geminiApiKey;
       geminiConfig.model = params.geminiModel || geminiConfig.model;
-      geminiConfig.referenceImage = params.referenceImage || undefined;
-      console.error(`[NanoBanana] Config updated: model=${geminiConfig.model}, hasRef=${!!geminiConfig.referenceImage}`);
+      geminiConfig.referenceImage = refImageData || undefined;
+      console.error(`[NanoBanana] Config updated: model=${geminiConfig.model}, hasRef=${!!refImageData}`);
     }
 
     console.error(
@@ -110,7 +125,7 @@ async function main(): Promise<void> {
         projectPath: params.projectPath,
         geminiApiKey: params.geminiApiKey,
         geminiModel: params.geminiModel,
-        referenceImage: params.referenceImage,
+        referenceImage: refImageData,
         onChunk: (chunk: string) => {
           bridge.sendRaw({ method: "ai/chunk", id, chunk });
         },
