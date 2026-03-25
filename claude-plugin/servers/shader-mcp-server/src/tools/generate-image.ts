@@ -2,6 +2,7 @@ import { z } from "zod";
 import { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import { UnityBridge } from "../unity-bridge.js";
 import { generateImage } from "../gemini-handler.js";
+import { readFileSync, existsSync } from "fs";
 
 /**
  * Stores the latest Gemini settings.
@@ -22,7 +23,12 @@ export const geminiConfig = {
   _model: "gemini-2.5-flash-image",
 
   get referenceImage(): string | undefined {
-    return process.env.GEMINI_REFERENCE_IMAGE || this._referenceImage;
+    // Read from temp file if path is set (subprocess mode)
+    const filePath = process.env.GEMINI_REFERENCE_IMAGE_PATH;
+    if (filePath && existsSync(filePath)) {
+      try { return readFileSync(filePath, "utf-8"); } catch { /* fall through */ }
+    }
+    return this._referenceImage;
   },
   set referenceImage(v: string | undefined) { this._referenceImage = v; },
   _referenceImage: undefined as string | undefined,

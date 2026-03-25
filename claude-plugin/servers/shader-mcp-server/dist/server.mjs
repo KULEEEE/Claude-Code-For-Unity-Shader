@@ -31178,24 +31178,29 @@ Please install manually: dotnet tool install --global shader-ls`);
 // build/ai-handler.js
 import { query } from "@anthropic-ai/claude-agent-sdk";
 import { tmpdir } from "os";
-import { existsSync } from "fs";
+import { existsSync, writeFileSync, unlinkSync } from "fs";
 import { fileURLToPath } from "url";
 import { dirname, join } from "path";
 async function handleAIQuery(request) {
-  const fullPrompt = buildFullPrompt(request.prompt, request.context, request.language, request.projectPath);
+  const fullPrompt = buildFullPrompt(request.prompt, request.context, request.language, request.projectPath, !!request.referenceImage);
   const cwd = request.projectPath && existsSync(request.projectPath) ? request.projectPath : tmpdir();
+  if (request.geminiApiKey)
+    process.env.GEMINI_API_KEY = request.geminiApiKey;
+  if (request.geminiModel)
+    process.env.GEMINI_MODEL = request.geminiModel;
+  let refImageTempPath;
+  if (request.referenceImage) {
+    refImageTempPath = join(tmpdir(), `unity-agent-ref-${Date.now()}.b64`);
+    writeFileSync(refImageTempPath, request.referenceImage, "utf-8");
+    process.env.GEMINI_REFERENCE_IMAGE_PATH = refImageTempPath;
+  } else {
+    delete process.env.GEMINI_REFERENCE_IMAGE_PATH;
+  }
+  delete process.env.GEMINI_REFERENCE_IMAGE;
   try {
     let resultText = "";
     request.onStatus?.("\u23F3 Claude Code \uC791\uC5C5 \uC2DC\uC791...");
     const serverPath = join(dirname(fileURLToPath(import.meta.url)), "server.mjs");
-    if (request.geminiApiKey)
-      process.env.GEMINI_API_KEY = request.geminiApiKey;
-    if (request.geminiModel)
-      process.env.GEMINI_MODEL = request.geminiModel;
-    if (request.referenceImage)
-      process.env.GEMINI_REFERENCE_IMAGE = request.referenceImage;
-    else
-      delete process.env.GEMINI_REFERENCE_IMAGE;
     for await (const msg of query({
       prompt: fullPrompt,
       options: {
@@ -31242,10 +31247,20 @@ async function handleAIQuery(request) {
   } catch (err) {
     const msg = err instanceof Error ? err.message : String(err);
     return { success: false, error: msg };
+  } finally {
+    if (refImageTempPath) {
+      try {
+        unlinkSync(refImageTempPath);
+      } catch {
+      }
+    }
   }
 }
-function buildFullPrompt(userPrompt, context, language, projectPath) {
+function buildFullPrompt(userPrompt, context, language, projectPath, hasReferenceImage) {
   let prompt = "You are a Unity development expert assistant embedded in a Unity Editor plugin. You can read, create, modify, and delete files in the Unity project. You have expertise in shaders (HLSL/ShaderLab), C# scripts, materials, textures, and all Unity workflows. You can also diagnose and fix Unity errors that prevent the project from compiling or running. You can generate images using the generate_image tool (powered by Google Nano Banana / Gemini Image). When the user asks to create a texture, sprite, icon, or any visual asset, use the generate_image tool with a detailed prompt. The generated image will appear in the Unity Editor where the user can save it to their project. Do NOT ask the user for file paths or project paths \u2014 the working directory is already set to the Unity project root. When fixing errors: read the relevant source files, understand the root cause, apply the fix, and explain what you changed. Answer clearly and concisely. When the user asks you to modify or create files, do it directly.\n";
+  if (hasReferenceImage) {
+    prompt += "IMPORTANT: The user has attached a reference image in the UI. When generating images, set useReferenceImage to true so the reference image is sent to Gemini. The reference image can be used for style transfer, color changes, edits, or as inspiration.\n";
+  }
   if (projectPath) {
     prompt += `Unity project path: ${projectPath}
 `;
@@ -31888,6 +31903,7 @@ async function generateImage(request) {
 }
 
 // build/tools/generate-image.js
+import { readFileSync as readFileSync2, existsSync as existsSync2 } from "fs";
 var geminiConfig = {
   get apiKey() {
     return process.env.GEMINI_API_KEY || this._apiKey;
@@ -31904,7 +31920,14 @@ var geminiConfig = {
   },
   _model: "gemini-2.5-flash-image",
   get referenceImage() {
-    return process.env.GEMINI_REFERENCE_IMAGE || this._referenceImage;
+    const filePath = process.env.GEMINI_REFERENCE_IMAGE_PATH;
+    if (filePath && existsSync2(filePath)) {
+      try {
+        return readFileSync2(filePath, "utf-8");
+      } catch {
+      }
+    }
+    return this._referenceImage;
   },
   set referenceImage(v) {
     this._referenceImage = v;

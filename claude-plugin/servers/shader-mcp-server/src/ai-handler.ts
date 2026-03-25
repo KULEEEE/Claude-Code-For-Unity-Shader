@@ -1,6 +1,6 @@
 import { query } from "@anthropic-ai/claude-agent-sdk";
 import { tmpdir } from "os";
-import { existsSync } from "fs";
+import { existsSync, writeFileSync, unlinkSync } from "fs";
 import { fileURLToPath } from "url";
 import { dirname, join } from "path";
 
@@ -32,7 +32,8 @@ export async function handleAIQuery(request: AIRequest): Promise<AIResponse> {
     request.prompt,
     request.context,
     request.language,
-    request.projectPath
+    request.projectPath,
+    !!request.referenceImage
   );
 
   // Use Unity project path as cwd if available, fallback to tmpdir
@@ -40,6 +41,21 @@ export async function handleAIQuery(request: AIRequest): Promise<AIResponse> {
     request.projectPath && existsSync(request.projectPath)
       ? request.projectPath
       : tmpdir();
+
+  // Set Gemini config in process.env so child processes inherit them
+  if (request.geminiApiKey) process.env.GEMINI_API_KEY = request.geminiApiKey;
+  if (request.geminiModel) process.env.GEMINI_MODEL = request.geminiModel;
+
+  // Write reference image to temp file (too large for env var)
+  let refImageTempPath: string | undefined;
+  if (request.referenceImage) {
+    refImageTempPath = join(tmpdir(), `unity-agent-ref-${Date.now()}.b64`);
+    writeFileSync(refImageTempPath, request.referenceImage, "utf-8");
+    process.env.GEMINI_REFERENCE_IMAGE_PATH = refImageTempPath;
+  } else {
+    delete process.env.GEMINI_REFERENCE_IMAGE_PATH;
+  }
+  delete process.env.GEMINI_REFERENCE_IMAGE;
 
   try {
     let resultText = "";
@@ -51,12 +67,6 @@ export async function handleAIQuery(request: AIRequest): Promise<AIResponse> {
       dirname(fileURLToPath(import.meta.url)),
       "server.mjs"
     );
-
-    // Set Gemini config in process.env so child processes inherit them
-    if (request.geminiApiKey) process.env.GEMINI_API_KEY = request.geminiApiKey;
-    if (request.geminiModel) process.env.GEMINI_MODEL = request.geminiModel;
-    if (request.referenceImage) process.env.GEMINI_REFERENCE_IMAGE = request.referenceImage;
-    else delete process.env.GEMINI_REFERENCE_IMAGE;
 
     for await (const msg of query({
       prompt: fullPrompt,
@@ -116,6 +126,11 @@ export async function handleAIQuery(request: AIRequest): Promise<AIResponse> {
   } catch (err) {
     const msg = err instanceof Error ? err.message : String(err);
     return { success: false, error: msg };
+  } finally {
+    // Clean up temp reference image file
+    if (refImageTempPath) {
+      try { unlinkSync(refImageTempPath); } catch {}
+    }
   }
 }
 
@@ -123,7 +138,8 @@ function buildFullPrompt(
   userPrompt: string,
   context?: string,
   language?: string,
-  projectPath?: string
+  projectPath?: string,
+  hasReferenceImage?: boolean
 ): string {
   let prompt =
     "You are a Unity development expert assistant embedded in a Unity Editor plugin. " +
@@ -136,6 +152,13 @@ function buildFullPrompt(
     "Do NOT ask the user for file paths or project paths — the working directory is already set to the Unity project root. " +
     "When fixing errors: read the relevant source files, understand the root cause, apply the fix, and explain what you changed. " +
     "Answer clearly and concisely. When the user asks you to modify or create files, do it directly.\n";
+
+  if (hasReferenceImage) {
+    prompt +=
+      "IMPORTANT: The user has attached a reference image in the UI. " +
+      "When generating images, set useReferenceImage to true so the reference image is sent to Gemini. " +
+      "The reference image can be used for style transfer, color changes, edits, or as inspiration.\n";
+  }
 
   if (projectPath) {
     prompt += `Unity project path: ${projectPath}\n`;
