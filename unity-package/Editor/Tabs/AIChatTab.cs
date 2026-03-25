@@ -11,7 +11,7 @@ namespace UnityAgent.Editor
     /// </summary>
     public class AIChatTab
     {
-        private readonly ShaderInspectorWindow _window;
+        private readonly IChatHost _host;
 
         // Chat state
         private readonly List<ChatMessage> _messages = new List<ChatMessage>();
@@ -47,9 +47,9 @@ namespace UnityAgent.Editor
             public string timestamp;
         }
 
-        public AIChatTab(ShaderInspectorWindow window)
+        public AIChatTab(IChatHost host)
         {
-            _window = window;
+            _host = host;
             AddSystemMessage("Hello! Ask me anything about your Unity project.");
         }
 
@@ -278,7 +278,7 @@ namespace UnityAgent.Editor
                     }
                     _streamingMessage.content += chunk;
                     _scrollToBottom = true;
-                    _window.Repaint();
+                    _host.Repaint();
                 },
                 onComplete: fullText =>
                 {
@@ -300,18 +300,18 @@ namespace UnityAgent.Editor
                     _statusText = null;
                     _isWaitingForResponse = false;
                     _scrollToBottom = true;
-                    _window.Repaint();
+                    _host.Repaint();
                 },
                 onStatus: status =>
                 {
                     _statusText = status;
                     _scrollToBottom = true;
-                    _window.Repaint();
+                    _host.Repaint();
                 },
-                language: _window.SelectedLanguage
+                language: _host.SelectedLanguage
             );
 
-            _window.Repaint();
+            _host.Repaint();
         }
 
         private void AddSystemMessage(string content)

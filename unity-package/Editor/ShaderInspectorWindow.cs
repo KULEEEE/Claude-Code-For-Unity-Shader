@@ -8,7 +8,7 @@ namespace UnityAgent.Editor
     /// Provides tabbed interface for shader browsing, material inspection, and AI chat.
     /// Menu: Tools > Shader MCP > Shader Inspector
     /// </summary>
-    public class ShaderInspectorWindow : EditorWindow
+    public class ShaderInspectorWindow : EditorWindow, IChatHost
     {
         private enum Tab { Shaders, Materials, AIChat }
         private static readonly string[] TabNames = { "Shaders", "Materials", "AI Chat" };
