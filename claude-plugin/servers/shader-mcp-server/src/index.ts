@@ -35,7 +35,7 @@ import { registerEditorPlatformResource } from "./resources/editor-platform.js";
 async function main(): Promise<void> {
   const server = new McpServer({
     name: "unity-agent-tools",
-    version: "0.7.5",
+    version: "0.7.6",
   });
 
   const bridge = new UnityBridge("ws://localhost:8090");

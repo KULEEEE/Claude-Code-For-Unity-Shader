@@ -48,9 +48,12 @@ export async function generateImage(
     });
   }
 
-  // Add text prompt with image generation instruction
+  // Add text prompt — if reference image is present, instruct Gemini to edit it
+  const finalPrompt = referenceImage
+    ? `Edit the provided image according to these instructions: ${prompt}`
+    : prompt;
   parts.push({
-    text: prompt,
+    text: finalPrompt,
   });
 
   const body = {

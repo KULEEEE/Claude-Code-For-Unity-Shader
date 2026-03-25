@@ -31834,8 +31834,9 @@ async function generateImage(request) {
       }
     });
   }
+  const finalPrompt = referenceImage ? `Edit the provided image according to these instructions: ${prompt}` : prompt;
   parts.push({
-    text: prompt
+    text: finalPrompt
   });
   const body = {
     contents: [
@@ -32130,7 +32131,7 @@ function registerEditorPlatformResource(server, bridge) {
 async function main() {
   const server = new McpServer({
     name: "unity-agent-tools",
-    version: "0.7.5"
+    version: "0.7.6"
   });
   const bridge = new UnityBridge("ws://localhost:8090");
   const lspClient = new ShaderLspClient();
