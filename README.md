@@ -56,7 +56,7 @@ https://github.com/user-attachments/assets/afc01579-e968-4505-81ac-1c56985d0e70
 
 Unity Editor → Window > Package Manager → `+` → **Add package from git URL**:
 ```
-https://github.com/KULEEEE/Claude-Code-For-Unity.git?path=unity-package
+https://github.com/KULEEEE/Unity-Agent-For-Claude-Code.git?path=unity-package
 ```
 
 ### 방법 2: 로컬 폴더
