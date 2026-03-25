@@ -90,7 +90,7 @@ namespace UnityAgent.Editor
             {
                 msgBuilder.Key("geminiApiKey").Value(geminiApiKey);
                 msgBuilder.Key("geminiModel").Value(
-                    !string.IsNullOrEmpty(geminiModel) ? geminiModel : "gemini-2.5-flash-preview-image-generation");
+                    !string.IsNullOrEmpty(geminiModel) ? geminiModel : "gemini-2.5-flash-image");
             }
 
             // Reference image (base64) if set

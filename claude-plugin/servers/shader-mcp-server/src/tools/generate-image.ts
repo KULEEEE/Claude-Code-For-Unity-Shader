@@ -19,7 +19,7 @@ export const geminiConfig = {
     return process.env.GEMINI_MODEL || this._model;
   },
   set model(v: string) { this._model = v; },
-  _model: "gemini-2.5-flash-preview-image-generation",
+  _model: "gemini-2.5-flash-image",
 
   get referenceImage(): string | undefined {
     return process.env.GEMINI_REFERENCE_IMAGE || this._referenceImage;

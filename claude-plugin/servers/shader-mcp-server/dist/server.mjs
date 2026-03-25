@@ -31902,7 +31902,7 @@ var geminiConfig = {
   set model(v) {
     this._model = v;
   },
-  _model: "gemini-2.5-flash-preview-image-generation",
+  _model: "gemini-2.5-flash-image",
   get referenceImage() {
     return process.env.GEMINI_REFERENCE_IMAGE || this._referenceImage;
   },
@@ -32107,7 +32107,7 @@ function registerEditorPlatformResource(server, bridge) {
 async function main() {
   const server = new McpServer({
     name: "unity-agent-tools",
-    version: "0.7.2"
+    version: "0.7.3"
   });
   const bridge = new UnityBridge("ws://localhost:8090");
   const lspClient = new ShaderLspClient();
