@@ -1,6 +1,7 @@
 using System;
 using System.Collections.Generic;
 using System.Text;
+using UnityEditor;
 using UnityEngine;
 
 namespace UnityAgent.Editor
@@ -81,6 +82,21 @@ namespace UnityAgent.Editor
             string projectPath = System.IO.Path.GetFullPath(
                 System.IO.Path.Combine(UnityEngine.Application.dataPath, ".."));
             msgBuilder.Key("projectPath").Value(projectPath);
+
+            // Nano Banana (Gemini Image) settings
+            string geminiApiKey = EditorPrefs.GetString("UnityAgent_GeminiApiKey", "");
+            string geminiModel = EditorPrefs.GetString("UnityAgent_GeminiModel", "");
+            if (!string.IsNullOrEmpty(geminiApiKey))
+            {
+                msgBuilder.Key("geminiApiKey").Value(geminiApiKey);
+                msgBuilder.Key("geminiModel").Value(
+                    !string.IsNullOrEmpty(geminiModel) ? geminiModel : "gemini-2.5-flash-preview-image-generation");
+            }
+
+            // Reference image (base64) if set
+            string refImageBase64 = GetReferenceImageBase64();
+            if (!string.IsNullOrEmpty(refImageBase64))
+                msgBuilder.Key("referenceImage").Value(refImageBase64);
 
             msgBuilder.EndObject();
             string message = msgBuilder.ToString();
@@ -180,6 +196,42 @@ namespace UnityAgent.Editor
             }
 
             request?.onComplete?.Invoke($"AI Error: {errorMessage}");
+        }
+
+        /// <summary>
+        /// Get the reference image from the active AIChatWindow as base64 PNG.
+        /// </summary>
+        private static string GetReferenceImageBase64()
+        {
+            var windows = Resources.FindObjectsOfTypeAll<AIChatWindow>();
+            if (windows.Length == 0) return null;
+
+            var refImage = windows[0].ReferenceImage;
+            if (refImage == null) return null;
+
+            try
+            {
+                // Need readable texture — make a copy via RenderTexture
+                RenderTexture rt = RenderTexture.GetTemporary(refImage.width, refImage.height);
+                Graphics.Blit(refImage, rt);
+                RenderTexture prev = RenderTexture.active;
+                RenderTexture.active = rt;
+
+                Texture2D readable = new Texture2D(refImage.width, refImage.height, TextureFormat.RGBA32, false);
+                readable.ReadPixels(new Rect(0, 0, refImage.width, refImage.height), 0, 0);
+                readable.Apply();
+
+                RenderTexture.active = prev;
+                RenderTexture.ReleaseTemporary(rt);
+
+                byte[] pngData = readable.EncodeToPNG();
+                UnityEngine.Object.DestroyImmediate(readable);
+                return Convert.ToBase64String(pngData);
+            }
+            catch
+            {
+                return null;
+            }
         }
     }
 }

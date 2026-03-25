@@ -23,6 +23,9 @@ import { registerReadProjectFileTool } from "./tools/read-project-file.js";
 import { registerWriteProjectFileTool } from "./tools/write-project-file.js";
 import { registerListProjectFilesTool } from "./tools/list-project-files.js";
 
+// Image Generation Tools
+import { registerGenerateImageTool, geminiConfig } from "./tools/generate-image.js";
+
 // Resources
 import { registerPipelineInfoResource } from "./resources/pipeline-info.js";
 import { registerShaderIncludesResource } from "./resources/shader-includes.js";
@@ -32,7 +35,7 @@ import { registerEditorPlatformResource } from "./resources/editor-platform.js";
 async function main(): Promise<void> {
   const server = new McpServer({
     name: "unity-agent-tools",
-    version: "0.5.0",
+    version: "0.7.0",
   });
 
   const bridge = new UnityBridge("ws://localhost:8090");
@@ -57,6 +60,9 @@ async function main(): Promise<void> {
   registerWriteProjectFileTool(server, bridge);
   registerListProjectFilesTool(server, bridge);
 
+  // ── Image Generation Tools (Nano Banana) ──
+  registerGenerateImageTool(server, bridge);
+
   // ── Resources ──
   registerPipelineInfoResource(server, bridge);
   registerShaderIncludesResource(server, bridge);
@@ -74,11 +80,22 @@ async function main(): Promise<void> {
       shaderContext?: string;
       language?: string;
       projectPath?: string;
+      geminiApiKey?: string;
+      geminiModel?: string;
+      referenceImage?: string;
     } | undefined;
 
     if (!id || !params?.prompt) {
       console.error("[UnityAgent] Invalid AI query: missing id or prompt");
       return;
+    }
+
+    // Update Gemini config from Unity settings
+    if (params.geminiApiKey) {
+      geminiConfig.apiKey = params.geminiApiKey;
+      geminiConfig.model = params.geminiModel || geminiConfig.model;
+      geminiConfig.referenceImage = params.referenceImage || undefined;
+      console.error(`[NanoBanana] Config updated: model=${geminiConfig.model}, hasRef=${!!geminiConfig.referenceImage}`);
     }
 
     console.error(

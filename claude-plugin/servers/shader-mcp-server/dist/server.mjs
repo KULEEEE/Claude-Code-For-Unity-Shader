@@ -31237,7 +31237,7 @@ async function handleAIQuery(request) {
   }
 }
 function buildFullPrompt(userPrompt, context, language, projectPath) {
-  let prompt = "You are a Unity development expert assistant embedded in a Unity Editor plugin. You can read, create, modify, and delete files in the Unity project. You have expertise in shaders (HLSL/ShaderLab), C# scripts, materials, textures, and all Unity workflows. You can also diagnose and fix Unity errors that prevent the project from compiling or running. Do NOT ask the user for file paths or project paths \u2014 the working directory is already set to the Unity project root. When fixing errors: read the relevant source files, understand the root cause, apply the fix, and explain what you changed. Answer clearly and concisely. When the user asks you to modify or create files, do it directly.\n";
+  let prompt = "You are a Unity development expert assistant embedded in a Unity Editor plugin. You can read, create, modify, and delete files in the Unity project. You have expertise in shaders (HLSL/ShaderLab), C# scripts, materials, textures, and all Unity workflows. You can also diagnose and fix Unity errors that prevent the project from compiling or running. You can generate images using the generate_image tool (powered by Google Nano Banana / Gemini Image). When the user asks to create a texture, sprite, icon, or any visual asset, use the generate_image tool with a detailed prompt. The generated image will appear in the Unity Editor where the user can save it to their project. Do NOT ask the user for file paths or project paths \u2014 the working directory is already set to the Unity project root. When fixing errors: read the relevant source files, understand the root cause, apply the fix, and explain what you changed. Answer clearly and concisely. When the user asks you to modify or create files, do it directly.\n";
   if (projectPath) {
     prompt += `Unity project path: ${projectPath}
 `;
@@ -31792,6 +31792,167 @@ function registerListProjectFilesTool(server, bridge) {
   });
 }
 
+// build/gemini-handler.js
+async function generateImage(request) {
+  const { apiKey, model, prompt, referenceImage } = request;
+  if (!apiKey) {
+    return {
+      success: false,
+      error: "Gemini API key not configured. Please set it in AI Chat > Settings."
+    };
+  }
+  const url = `https://generativelanguage.googleapis.com/v1beta/models/${model}:generateContent?key=${apiKey}`;
+  const parts = [];
+  if (referenceImage) {
+    parts.push({
+      inlineData: {
+        mimeType: "image/png",
+        data: referenceImage
+      }
+    });
+  }
+  parts.push({
+    text: prompt
+  });
+  const body = {
+    contents: [
+      {
+        parts
+      }
+    ],
+    generationConfig: {
+      responseModalities: ["TEXT", "IMAGE"]
+    }
+  };
+  try {
+    console.error(`[NanoBanana] Generating image with ${model}: "${prompt.substring(0, 60)}..."`);
+    const response = await fetch(url, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(body)
+    });
+    if (!response.ok) {
+      const errorText = await response.text();
+      let errorMsg = `Gemini API error (${response.status})`;
+      try {
+        const errorJson = JSON.parse(errorText);
+        errorMsg = errorJson.error?.message || errorMsg;
+      } catch {
+        errorMsg += `: ${errorText.substring(0, 200)}`;
+      }
+      return { success: false, error: errorMsg };
+    }
+    const data = await response.json();
+    let imageBase64;
+    let description;
+    const candidates = data.candidates;
+    if (candidates && candidates.length > 0) {
+      const parts2 = candidates[0].content?.parts;
+      if (parts2) {
+        for (const part of parts2) {
+          if (part.inlineData?.data) {
+            imageBase64 = part.inlineData.data;
+          }
+          if (part.text) {
+            description = part.text;
+          }
+        }
+      }
+    }
+    if (!imageBase64) {
+      return {
+        success: false,
+        error: "Gemini returned no image data. The model may not support image generation, or the prompt was filtered.",
+        ...description ? { description } : {}
+      };
+    }
+    console.error("[NanoBanana] Image generated successfully.");
+    return {
+      success: true,
+      imageBase64,
+      description: description || "Generated image"
+    };
+  } catch (err) {
+    const msg = err instanceof Error ? err.message : String(err);
+    console.error(`[NanoBanana] Error: ${msg}`);
+    return { success: false, error: `Gemini request failed: ${msg}` };
+  }
+}
+
+// build/tools/generate-image.js
+var geminiConfig = {
+  apiKey: "",
+  model: "gemini-2.5-flash-preview-image-generation",
+  referenceImage: void 0
+};
+function registerGenerateImageTool(server, bridge) {
+  server.tool("generate_image", "Generate an image using Google's Nano Banana (Gemini Image Generation). Use this when the user asks to create, generate, or make an image, texture, sprite, icon, or visual asset. The generated image will be displayed in the Unity Editor's AI Chat window where the user can save it to their project. You should describe what you're generating and call this tool with a detailed prompt.", {
+    prompt: external_exports.string().describe("Detailed image generation prompt. Be specific about style, colors, composition, and content. For game textures, include terms like 'seamless', 'tileable', 'PBR', etc."),
+    useReferenceImage: external_exports.boolean().optional().describe("Whether to include the user's reference image (if one is set in the UI). Default: true if available.")
+  }, async ({ prompt, useReferenceImage }) => {
+    if (!geminiConfig.apiKey) {
+      return {
+        content: [
+          {
+            type: "text",
+            text: "Error: Gemini API key is not configured. The user needs to set it in AI Chat > Settings panel."
+          }
+        ],
+        isError: true
+      };
+    }
+    try {
+      const shouldUseRef = useReferenceImage !== false;
+      const refImage = shouldUseRef && geminiConfig.referenceImage ? geminiConfig.referenceImage : void 0;
+      const result = await generateImage({
+        apiKey: geminiConfig.apiKey,
+        model: geminiConfig.model,
+        prompt,
+        referenceImage: refImage
+      });
+      if (result.success && result.imageBase64) {
+        bridge.sendRaw({
+          method: "image/generated",
+          imageData: result.imageBase64,
+          description: result.description || `Generated: ${prompt.substring(0, 60)}`
+        });
+        return {
+          content: [
+            {
+              type: "text",
+              text: `Image generated successfully and sent to the Unity Editor.
+Model: ${geminiConfig.model}
+Prompt: "${prompt}"
+` + (result.description ? `Description: ${result.description}
+` : "") + `The user can now preview and save it to their project from the AI Chat window.`
+            }
+          ]
+        };
+      } else {
+        return {
+          content: [
+            {
+              type: "text",
+              text: `Image generation failed: ${result.error || "Unknown error"}`
+            }
+          ],
+          isError: true
+        };
+      }
+    } catch (err) {
+      return {
+        content: [
+          {
+            type: "text",
+            text: `Image generation error: ${err instanceof Error ? err.message : String(err)}`
+          }
+        ],
+        isError: true
+      };
+    }
+  });
+}
+
 // build/resources/pipeline-info.js
 function registerPipelineInfoResource(server, bridge) {
   server.resource("pipeline-info", "unity://pipeline/info", {
@@ -31920,7 +32081,7 @@ function registerEditorPlatformResource(server, bridge) {
 async function main() {
   const server = new McpServer({
     name: "unity-agent-tools",
-    version: "0.5.0"
+    version: "0.7.0"
   });
   const bridge = new UnityBridge("ws://localhost:8090");
   const lspClient = new ShaderLspClient();
@@ -31937,6 +32098,7 @@ async function main() {
   registerReadProjectFileTool(server, bridge);
   registerWriteProjectFileTool(server, bridge);
   registerListProjectFilesTool(server, bridge);
+  registerGenerateImageTool(server, bridge);
   registerPipelineInfoResource(server, bridge);
   registerShaderIncludesResource(server, bridge);
   registerShaderKeywordsResource(server, bridge);
@@ -31949,6 +32111,12 @@ async function main() {
     if (!id || !params?.prompt) {
       console.error("[UnityAgent] Invalid AI query: missing id or prompt");
       return;
+    }
+    if (params.geminiApiKey) {
+      geminiConfig.apiKey = params.geminiApiKey;
+      geminiConfig.model = params.geminiModel || geminiConfig.model;
+      geminiConfig.referenceImage = params.referenceImage || void 0;
+      console.error(`[NanoBanana] Config updated: model=${geminiConfig.model}, hasRef=${!!geminiConfig.referenceImage}`);
     }
     console.error(`[UnityAgent] AI query received (id=${id}): ${params.prompt.substring(0, 80)}...`);
     try {

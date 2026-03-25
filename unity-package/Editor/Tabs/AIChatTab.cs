@@ -1,5 +1,6 @@
 using System;
 using System.Collections.Generic;
+using System.IO;
 using UnityEditor;
 using UnityEngine;
 
@@ -7,7 +8,7 @@ namespace UnityAgent.Editor
 {
     /// <summary>
     /// AI Chat tab: free-form chat with Claude about the Unity project.
-    /// Supports optional context attachment and conversation history.
+    /// Supports optional context attachment, conversation history, and inline image display.
     /// </summary>
     public class AIChatTab
     {
@@ -27,7 +28,6 @@ namespace UnityAgent.Editor
         private string _contextAssetName;
         private string _contextContent;
 
-
         // Quick presets
         private bool _showQuickMenu;
         private static readonly string[] QuickPresets =
@@ -45,6 +45,12 @@ namespace UnityAgent.Editor
             public bool isUser;
             public string content;
             public string timestamp;
+
+            // Image data (for generated images)
+            public Texture2D image;
+            public string imageBase64;
+            public bool imageSaved;
+            public string imageSavePath;
         }
 
         public AIChatTab(IChatHost host)
@@ -133,10 +139,20 @@ namespace UnityAgent.Editor
                 }
                 EditorGUILayout.EndHorizontal();
 
-                if (msg.isUser)
-                    EditorGUILayout.LabelField(msg.content, EditorStyles.wordWrappedLabel);
-                else
-                    MarkdownRenderer.Render(msg.content);
+                // Text content
+                if (!string.IsNullOrEmpty(msg.content))
+                {
+                    if (msg.isUser)
+                        EditorGUILayout.LabelField(msg.content, EditorStyles.wordWrappedLabel);
+                    else
+                        MarkdownRenderer.Render(msg.content);
+                }
+
+                // Inline image display
+                if (msg.image != null)
+                {
+                    DrawInlineImage(msg);
+                }
 
                 EditorGUILayout.EndVertical();
                 EditorGUILayout.Space(2);
@@ -159,6 +175,84 @@ namespace UnityAgent.Editor
             {
                 _chatScrollPos.y = float.MaxValue;
                 _scrollToBottom = false;
+            }
+        }
+
+        private void DrawInlineImage(ChatMessage msg)
+        {
+            EditorGUILayout.Space(4);
+
+            // Image preview (max 256px wide, maintain aspect ratio)
+            float maxWidth = Mathf.Min(256f, EditorGUIUtility.currentViewWidth - 80f);
+            float aspect = (float)msg.image.height / msg.image.width;
+            float displayWidth = maxWidth;
+            float displayHeight = displayWidth * aspect;
+
+            var imageRect = GUILayoutUtility.GetRect(displayWidth, displayHeight);
+            EditorGUI.DrawPreviewTexture(imageRect, msg.image, null, ScaleMode.ScaleToFit);
+
+            EditorGUILayout.Space(2);
+
+            // Save button
+            EditorGUILayout.BeginHorizontal();
+            if (msg.imageSaved)
+            {
+                var oldColor = GUI.color;
+                GUI.color = ShaderInspectorStyles.GreenStatus;
+                EditorGUILayout.LabelField($"Saved: {msg.imageSavePath}", EditorStyles.miniLabel);
+                GUI.color = oldColor;
+
+                if (GUILayout.Button("Ping", EditorStyles.miniButton, GUILayout.Width(40)))
+                {
+                    var asset = AssetDatabase.LoadAssetAtPath<UnityEngine.Object>(msg.imageSavePath);
+                    if (asset != null) EditorGUIUtility.PingObject(asset);
+                }
+            }
+            else
+            {
+                if (GUILayout.Button("Save to Assets", EditorStyles.miniButton, GUILayout.Width(100)))
+                {
+                    SaveImageToAssets(msg);
+                }
+            }
+            EditorGUILayout.EndHorizontal();
+        }
+
+        private void SaveImageToAssets(ChatMessage msg)
+        {
+            // Default folder
+            string folder = "Assets/GeneratedImages";
+            if (!AssetDatabase.IsValidFolder(folder))
+            {
+                AssetDatabase.CreateFolder("Assets", "GeneratedImages");
+            }
+
+            string filename = $"NanoBanana_{DateTime.Now:yyyyMMdd_HHmmss}.png";
+            string path = EditorUtility.SaveFilePanel("Save Generated Image", folder, filename, "png");
+
+            if (string.IsNullOrEmpty(path)) return;
+
+            // Convert to project-relative path
+            if (path.StartsWith(Application.dataPath))
+            {
+                string relativePath = "Assets" + path.Substring(Application.dataPath.Length);
+
+                byte[] pngData = msg.image.EncodeToPNG();
+                File.WriteAllBytes(path, pngData);
+                AssetDatabase.Refresh();
+
+                msg.imageSaved = true;
+                msg.imageSavePath = relativePath;
+                _host.Repaint();
+            }
+            else
+            {
+                // Save outside project (just write file, no asset import)
+                byte[] pngData = msg.image.EncodeToPNG();
+                File.WriteAllBytes(path, pngData);
+                msg.imageSaved = true;
+                msg.imageSavePath = path;
+                _host.Repaint();
             }
         }
 
@@ -382,6 +476,33 @@ namespace UnityAgent.Editor
 
             _inputText = prompt;
             SendMessage();
+        }
+
+        /// <summary>Add a generated image to the chat as an AI message.</summary>
+        public void AddGeneratedImage(string base64Data, string description = null)
+        {
+            try
+            {
+                byte[] imageBytes = Convert.FromBase64String(base64Data);
+                var texture = new Texture2D(2, 2);
+                if (texture.LoadImage(imageBytes))
+                {
+                    _messages.Add(new ChatMessage
+                    {
+                        isUser = false,
+                        content = description ?? "Generated image:",
+                        timestamp = DateTime.Now.ToString("HH:mm"),
+                        image = texture,
+                        imageBase64 = base64Data
+                    });
+                    _scrollToBottom = true;
+                    _host.Repaint();
+                }
+            }
+            catch (Exception e)
+            {
+                AddSystemMessage($"Failed to load image: {e.Message}");
+            }
         }
 
         #endregion

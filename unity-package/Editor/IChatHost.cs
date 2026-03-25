@@ -8,5 +8,10 @@ namespace UnityAgent.Editor
     {
         void Repaint();
         string SelectedLanguage { get; }
+
+        // Nano Banana (Gemini Image) settings — optional
+        string GeminiApiKey => null;
+        string GeminiModel => null;
+        UnityEngine.Texture2D ReferenceImage => null;
     }
 }
