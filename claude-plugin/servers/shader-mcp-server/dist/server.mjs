@@ -31282,6 +31282,156 @@ ${context}
 ${userPrompt}`;
   return prompt;
 }
+async function handleImageEnhance(request) {
+  try {
+    request.onStatus?.("\u{1F3A8} Claude is analyzing and enhancing your prompt...");
+    let resultText = "";
+    const systemPrompt = "You are an expert AI image prompt engineer. Your job is to take a user's brief description and transform it into a detailed, optimized prompt for Google's Gemini image generation model (Nano Banana). If a reference image is provided, analyze it carefully and incorporate its visual characteristics into your prompt. Output ONLY the enhanced prompt text \u2014 no explanations, no markdown, no prefixes. The prompt should be in English for best results with Gemini, but add a brief explanation in the user's language after '---'. Format:\n[enhanced prompt in English]\n---\n[brief explanation in user's language]";
+    let languageNote = "";
+    if (request.language) {
+      languageNote = `
+The user speaks ${request.language}. Write the explanation after --- in ${request.language}.`;
+    }
+    async function* generateMessages() {
+      const contentParts = [];
+      if (request.referenceImage) {
+        contentParts.push({
+          type: "image",
+          source: {
+            type: "base64",
+            media_type: "image/png",
+            data: request.referenceImage
+          }
+        });
+        request.onStatus?.("\u{1F3A8} Claude is analyzing your reference image...");
+      }
+      contentParts.push({
+        type: "text",
+        text: systemPrompt + languageNote + `
+
+User's description: "${request.prompt}"` + (request.referenceImage ? "\n\nA reference image is attached above. Analyze its style, colors, composition, and subject, then incorporate these into the enhanced prompt." : "")
+      });
+      yield {
+        type: "user",
+        message: {
+          role: "user",
+          content: contentParts
+        },
+        parent_tool_use_id: null,
+        session_id: ""
+      };
+    }
+    for await (const msg of query({
+      prompt: generateMessages(),
+      options: {
+        maxTurns: 1
+      }
+    })) {
+      if (msg.type === "result") {
+        resultText = msg.result ?? "";
+      }
+    }
+    const parts = resultText.split("---");
+    const enhancedPrompt = parts[0].trim();
+    const explanation = parts.length > 1 ? parts.slice(1).join("---").trim() : "";
+    return {
+      success: true,
+      enhancedPrompt,
+      explanation
+    };
+  } catch (err) {
+    const msg = err instanceof Error ? err.message : String(err);
+    return { success: false, error: msg };
+  }
+}
+
+// build/gemini-handler.js
+async function generateImage(request) {
+  const { apiKey, model, prompt, referenceImage } = request;
+  if (!apiKey) {
+    return {
+      success: false,
+      error: "Gemini API key not configured. Please set it in AI Chat > Settings."
+    };
+  }
+  const url = `https://generativelanguage.googleapis.com/v1beta/models/${model}:generateContent?key=${apiKey}`;
+  const parts = [];
+  if (referenceImage) {
+    parts.push({
+      inlineData: {
+        mimeType: "image/png",
+        data: referenceImage
+      }
+    });
+  }
+  const finalPrompt = referenceImage ? `Edit the provided image according to these instructions: ${prompt}` : prompt;
+  parts.push({
+    text: finalPrompt
+  });
+  const body = {
+    contents: [
+      {
+        parts
+      }
+    ],
+    generationConfig: {
+      responseModalities: ["TEXT", "IMAGE"]
+    }
+  };
+  try {
+    console.error(`[NanoBanana] Generating image with ${model}: "${prompt.substring(0, 60)}..."`);
+    const response = await fetch(url, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(body)
+    });
+    if (!response.ok) {
+      const errorText = await response.text();
+      let errorMsg = `Gemini API error (${response.status})`;
+      try {
+        const errorJson = JSON.parse(errorText);
+        errorMsg = errorJson.error?.message || errorMsg;
+      } catch {
+        errorMsg += `: ${errorText.substring(0, 200)}`;
+      }
+      return { success: false, error: errorMsg };
+    }
+    const data = await response.json();
+    let imageBase64;
+    let description;
+    const candidates = data.candidates;
+    if (candidates && candidates.length > 0) {
+      const parts2 = candidates[0].content?.parts;
+      if (parts2) {
+        for (const part of parts2) {
+          if (part.inlineData?.data) {
+            imageBase64 = part.inlineData.data;
+          }
+          if (part.text) {
+            description = part.text;
+          }
+        }
+      }
+    }
+    if (!imageBase64) {
+      return {
+        success: false,
+        error: "Gemini returned no image data. The model may not support image generation, or the prompt was filtered.",
+        ...description ? { description } : {}
+      };
+    }
+    console.error("[NanoBanana] Image generated successfully.");
+    return {
+      success: true,
+      imageBase64,
+      description: description || "Generated image"
+    };
+  } catch (err) {
+    const msg = err instanceof Error ? err.message : String(err);
+    console.error(`[NanoBanana] Error: ${msg}`);
+    return { success: false, error: `Gemini request failed: ${msg}` };
+  }
+}
 
 // build/tools/shader-compile.js
 var COMPILE_TIMEOUT = 3e4;
@@ -31815,94 +31965,6 @@ function registerListProjectFilesTool(server, bridge) {
   });
 }
 
-// build/gemini-handler.js
-async function generateImage(request) {
-  const { apiKey, model, prompt, referenceImage } = request;
-  if (!apiKey) {
-    return {
-      success: false,
-      error: "Gemini API key not configured. Please set it in AI Chat > Settings."
-    };
-  }
-  const url = `https://generativelanguage.googleapis.com/v1beta/models/${model}:generateContent?key=${apiKey}`;
-  const parts = [];
-  if (referenceImage) {
-    parts.push({
-      inlineData: {
-        mimeType: "image/png",
-        data: referenceImage
-      }
-    });
-  }
-  const finalPrompt = referenceImage ? `Edit the provided image according to these instructions: ${prompt}` : prompt;
-  parts.push({
-    text: finalPrompt
-  });
-  const body = {
-    contents: [
-      {
-        parts
-      }
-    ],
-    generationConfig: {
-      responseModalities: ["TEXT", "IMAGE"]
-    }
-  };
-  try {
-    console.error(`[NanoBanana] Generating image with ${model}: "${prompt.substring(0, 60)}..."`);
-    const response = await fetch(url, {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify(body)
-    });
-    if (!response.ok) {
-      const errorText = await response.text();
-      let errorMsg = `Gemini API error (${response.status})`;
-      try {
-        const errorJson = JSON.parse(errorText);
-        errorMsg = errorJson.error?.message || errorMsg;
-      } catch {
-        errorMsg += `: ${errorText.substring(0, 200)}`;
-      }
-      return { success: false, error: errorMsg };
-    }
-    const data = await response.json();
-    let imageBase64;
-    let description;
-    const candidates = data.candidates;
-    if (candidates && candidates.length > 0) {
-      const parts2 = candidates[0].content?.parts;
-      if (parts2) {
-        for (const part of parts2) {
-          if (part.inlineData?.data) {
-            imageBase64 = part.inlineData.data;
-          }
-          if (part.text) {
-            description = part.text;
-          }
-        }
-      }
-    }
-    if (!imageBase64) {
-      return {
-        success: false,
-        error: "Gemini returned no image data. The model may not support image generation, or the prompt was filtered.",
-        ...description ? { description } : {}
-      };
-    }
-    console.error("[NanoBanana] Image generated successfully.");
-    return {
-      success: true,
-      imageBase64,
-      description: description || "Generated image"
-    };
-  } catch (err) {
-    const msg = err instanceof Error ? err.message : String(err);
-    console.error(`[NanoBanana] Error: ${msg}`);
-    return { success: false, error: `Gemini request failed: ${msg}` };
-  }
-}
-
 // build/tools/generate-image.js
 import { readFileSync as readFileSync2, existsSync as existsSync2 } from "fs";
 var geminiConfig = {
@@ -32131,7 +32193,7 @@ function registerEditorPlatformResource(server, bridge) {
 async function main() {
   const server = new McpServer({
     name: "unity-agent-tools",
-    version: "0.7.6"
+    version: "0.8.0"
   });
   const bridge = new UnityBridge("ws://localhost:8090");
   const lspClient = new ShaderLspClient();
@@ -32205,6 +32267,73 @@ async function main() {
     } catch (err) {
       const errMsg = err instanceof Error ? err.message : String(err);
       bridge.sendRaw({ method: "ai/response", id, error: `AI handler error: ${errMsg}` });
+    }
+  });
+  bridge.onMessage(async (msg) => {
+    if (msg.method !== "image/enhance")
+      return;
+    const id = msg.id;
+    const params = msg.params;
+    if (!id || !params?.prompt) {
+      console.error("[UnityAgent] Invalid image/enhance: missing id or prompt");
+      return;
+    }
+    let refImageData;
+    if (params.referenceImagePath) {
+      try {
+        const { readFileSync: readFileSync3 } = await import("fs");
+        refImageData = readFileSync3(params.referenceImagePath, "utf-8");
+      } catch (e) {
+        console.error(`[NanoBanana] Failed to read reference image: ${e}`);
+      }
+    }
+    if (params.geminiApiKey) {
+      geminiConfig.apiKey = params.geminiApiKey;
+      geminiConfig.model = params.geminiModel || geminiConfig.model;
+    }
+    console.error(`[NanoBanana] Image enhance request: "${params.prompt.substring(0, 60)}..."`);
+    try {
+      bridge.sendRaw({ method: "ai/status", id, status: "\u{1F3A8} Claude is enhancing your prompt..." });
+      const enhanceResult = await handleImageEnhance({
+        prompt: params.prompt,
+        language: params.language,
+        referenceImage: refImageData,
+        onStatus: (status) => {
+          bridge.sendRaw({ method: "ai/status", id, status });
+        }
+      });
+      if (!enhanceResult.success || !enhanceResult.enhancedPrompt) {
+        bridge.sendRaw({ method: "ai/response", id, error: `Prompt enhance failed: ${enhanceResult.error}` });
+        return;
+      }
+      console.error(`[NanoBanana] Enhanced prompt: "${enhanceResult.enhancedPrompt.substring(0, 80)}..."`);
+      bridge.sendRaw({ method: "ai/status", id, status: "\u{1F5BC}\uFE0F Generating image with Gemini..." });
+      const imageResult = await generateImage({
+        apiKey: geminiConfig.apiKey,
+        model: geminiConfig.model,
+        prompt: refImageData ? `Edit the provided image according to these instructions: ${enhanceResult.enhancedPrompt}` : enhanceResult.enhancedPrompt,
+        referenceImage: refImageData
+      });
+      if (imageResult.success && imageResult.imageBase64) {
+        bridge.sendRaw({
+          method: "image/generated",
+          imageData: imageResult.imageBase64,
+          description: imageResult.description || `Generated: ${enhanceResult.enhancedPrompt.substring(0, 60)}`
+        });
+        let responseText = "";
+        if (enhanceResult.explanation) {
+          responseText = enhanceResult.explanation;
+        }
+        responseText += `
+
+Enhanced prompt: "${enhanceResult.enhancedPrompt}"`;
+        bridge.sendRaw({ method: "ai/response", id, result: responseText });
+      } else {
+        bridge.sendRaw({ method: "ai/response", id, error: `Image generation failed: ${imageResult.error}` });
+      }
+    } catch (err) {
+      const errMsg = err instanceof Error ? err.message : String(err);
+      bridge.sendRaw({ method: "ai/response", id, error: `Image enhance error: ${errMsg}` });
     }
   });
   bridge.connect().catch(() => {

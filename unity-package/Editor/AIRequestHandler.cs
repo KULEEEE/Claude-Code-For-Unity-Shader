@@ -130,6 +130,78 @@ namespace UnityAgent.Editor
         }
 
         /// <summary>
+        /// Send an image generation request: Claude enhances the prompt, then Gemini generates.
+        /// Uses "image/enhance" method instead of "ai/query".
+        /// </summary>
+        public static void SendImageEnhance(string prompt, Action<string> onStatus, Action<string> onComplete, string language = null)
+        {
+            if (!IsAvailable)
+            {
+                onComplete?.Invoke("AI is not available.");
+                return;
+            }
+
+            string id = Guid.NewGuid().ToString();
+
+            var msgBuilder = JsonHelper.StartObject()
+                .Key("id").Value(id)
+                .Key("method").Value("image/enhance")
+                .Key("params").BeginObject()
+                    .Key("prompt").Value(prompt);
+
+            if (!string.IsNullOrEmpty(language))
+                msgBuilder.Key("language").Value(language);
+
+            string projectPath = System.IO.Path.GetFullPath(
+                System.IO.Path.Combine(UnityEngine.Application.dataPath, ".."));
+            msgBuilder.Key("projectPath").Value(projectPath);
+
+            // Gemini settings
+            string geminiApiKey = EditorPrefs.GetString("UnityAgent_GeminiApiKey", "");
+            string geminiModel = EditorPrefs.GetString("UnityAgent_GeminiModel", "");
+            if (!string.IsNullOrEmpty(geminiApiKey))
+            {
+                msgBuilder.Key("geminiApiKey").Value(geminiApiKey);
+                msgBuilder.Key("geminiModel").Value(
+                    !string.IsNullOrEmpty(geminiModel) ? geminiModel : "gemini-2.5-flash-image");
+            }
+
+            // Reference image path
+            string refImageBase64 = GetReferenceImageBase64();
+            if (!string.IsNullOrEmpty(refImageBase64))
+            {
+                string tempPath = System.IO.Path.Combine(
+                    System.IO.Path.GetTempPath(), $"unity-agent-ref-{id}.b64");
+                System.IO.File.WriteAllText(tempPath, refImageBase64);
+                msgBuilder.Key("referenceImagePath").Value(tempPath);
+            }
+
+            msgBuilder.EndObject();
+            string message = msgBuilder.ToString();
+
+            lock (_lock)
+            {
+                _pendingRequests[id] = new PendingRequest
+                {
+                    onChunk = null,
+                    onComplete = onComplete,
+                    onStatus = onStatus
+                };
+            }
+
+            try
+            {
+                UnityAgentServer.SendToClient(message);
+                Debug.Log($"[UnityAgent] Image enhance sent (id={id})");
+            }
+            catch (Exception ex)
+            {
+                lock (_lock) { _pendingRequests.Remove(id); }
+                onComplete?.Invoke($"Failed to send image enhance: {ex.Message}");
+            }
+        }
+
+        /// <summary>
         /// Handle a status update received from the MCP server.
         /// Called by UnityAgentServer when it receives an "ai/status" message.
         /// </summary>

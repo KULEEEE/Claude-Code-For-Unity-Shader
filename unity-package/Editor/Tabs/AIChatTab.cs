@@ -28,6 +28,9 @@ namespace UnityAgent.Editor
         private string _contextAssetName;
         private string _contextContent;
 
+        // Mode toggle
+        private bool _imageGenMode;
+
         // Quick presets
         private bool _showQuickMenu;
         private static readonly string[] QuickPresets =
@@ -264,8 +267,28 @@ namespace UnityAgent.Editor
         {
             EditorGUILayout.Space(2);
 
-            // Quick presets
-            if (_showQuickMenu)
+            // Mode toggle bar
+            EditorGUILayout.BeginHorizontal();
+            var chatStyle = _imageGenMode ? EditorStyles.miniButton : EditorStyles.miniBoldLabel;
+            var imgStyle = _imageGenMode ? EditorStyles.miniBoldLabel : EditorStyles.miniButton;
+            if (GUILayout.Button("Chat", chatStyle, GUILayout.Width(50)))
+                _imageGenMode = false;
+            if (GUILayout.Button("Image Gen", imgStyle, GUILayout.Width(70)))
+                _imageGenMode = true;
+            GUILayout.FlexibleSpace();
+
+            if (_imageGenMode)
+            {
+                var oldColor = GUI.color;
+                GUI.color = ShaderInspectorStyles.CyanStatus;
+                EditorGUILayout.LabelField("Claude enhances prompt + Gemini generates", EditorStyles.miniLabel);
+                GUI.color = oldColor;
+            }
+
+            EditorGUILayout.EndHorizontal();
+
+            // Quick presets (Chat mode only)
+            if (!_imageGenMode && _showQuickMenu)
             {
                 EditorGUILayout.BeginVertical(EditorStyles.helpBox);
                 EditorGUILayout.LabelField("Quick Presets:", EditorStyles.miniBoldLabel);
@@ -283,29 +306,41 @@ namespace UnityAgent.Editor
 
             EditorGUILayout.BeginHorizontal();
 
-            // Multi-line text input
+            // Text input
+            string placeholder = _imageGenMode ? "Describe the image you want..." : "";
             _inputText = EditorGUILayout.TextField(_inputText, GUILayout.Height(24), GUILayout.ExpandWidth(true));
 
             // Send on Enter (without shift)
             if (Event.current.type == EventType.KeyDown && Event.current.keyCode == KeyCode.Return
                 && !Event.current.shift && !string.IsNullOrEmpty(_inputText) && !_isWaitingForResponse)
             {
-                SendMessage();
+                if (_imageGenMode)
+                    SendImageGenMessage();
+                else
+                    SendMessage();
                 Event.current.Use();
             }
 
             EditorGUI.BeginDisabledGroup(_isWaitingForResponse || string.IsNullOrEmpty(_inputText));
-            if (GUILayout.Button("Send", GUILayout.Width(50), GUILayout.Height(24)))
+            string btnLabel = _imageGenMode ? "Generate" : "Send";
+            float btnWidth = _imageGenMode ? 65 : 50;
+            if (GUILayout.Button(btnLabel, GUILayout.Width(btnWidth), GUILayout.Height(24)))
             {
-                SendMessage();
+                if (_imageGenMode)
+                    SendImageGenMessage();
+                else
+                    SendMessage();
             }
             EditorGUI.EndDisabledGroup();
 
-            // Quick menu toggle
-            string quickLabel = _showQuickMenu ? "Quick ^" : "Quick v";
-            if (GUILayout.Button(quickLabel, GUILayout.Width(60), GUILayout.Height(24)))
+            // Quick menu toggle (Chat mode only)
+            if (!_imageGenMode)
             {
-                _showQuickMenu = !_showQuickMenu;
+                string quickLabel = _showQuickMenu ? "Quick ^" : "Quick v";
+                if (GUILayout.Button(quickLabel, GUILayout.Width(60), GUILayout.Height(24)))
+                {
+                    _showQuickMenu = !_showQuickMenu;
+                }
             }
 
             EditorGUILayout.EndHorizontal();
@@ -399,6 +434,57 @@ namespace UnityAgent.Editor
                 onStatus: status =>
                 {
                     _statusText = status;
+                    _scrollToBottom = true;
+                    _host.Repaint();
+                },
+                language: _host.SelectedLanguage
+            );
+
+            _host.Repaint();
+        }
+
+        /// <summary>
+        /// Image Gen mode: sends prompt to Claude for enhancement, then generates image.
+        /// Uses image/enhance message type instead of ai/query.
+        /// </summary>
+        private void SendImageGenMessage()
+        {
+            if (string.IsNullOrWhiteSpace(_inputText) || _isWaitingForResponse) return;
+
+            string userMessage = _inputText.Trim();
+            _inputText = "";
+
+            _messages.Add(new ChatMessage
+            {
+                isUser = true,
+                content = $"[Image Gen] {userMessage}",
+                timestamp = DateTime.Now.ToString("HH:mm")
+            });
+
+            _isWaitingForResponse = true;
+            _scrollToBottom = true;
+            _statusText = "Enhancing prompt with Claude...";
+
+            AIRequestHandler.SendImageEnhance(userMessage,
+                onStatus: status =>
+                {
+                    _statusText = status;
+                    _scrollToBottom = true;
+                    _host.Repaint();
+                },
+                onComplete: result =>
+                {
+                    if (!string.IsNullOrEmpty(result))
+                    {
+                        _messages.Add(new ChatMessage
+                        {
+                            isUser = false,
+                            content = result,
+                            timestamp = DateTime.Now.ToString("HH:mm")
+                        });
+                    }
+                    _statusText = null;
+                    _isWaitingForResponse = false;
                     _scrollToBottom = true;
                     _host.Repaint();
                 },

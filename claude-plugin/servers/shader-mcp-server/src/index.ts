@@ -2,7 +2,8 @@ import { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import { StdioServerTransport } from "@modelcontextprotocol/sdk/server/stdio.js";
 import { UnityBridge } from "./unity-bridge.js";
 import { ShaderLspClient } from "./lsp-client.js";
-import { handleAIQuery } from "./ai-handler.js";
+import { handleAIQuery, handleImageEnhance } from "./ai-handler.js";
+import { generateImage } from "./gemini-handler.js";
 
 // Shader Tools
 import { registerShaderCompileTool } from "./tools/shader-compile.js";
@@ -35,7 +36,7 @@ import { registerEditorPlatformResource } from "./resources/editor-platform.js";
 async function main(): Promise<void> {
   const server = new McpServer({
     name: "unity-agent-tools",
-    version: "0.7.6",
+    version: "0.8.0",
   });
 
   const bridge = new UnityBridge("ws://localhost:8090");
@@ -142,6 +143,101 @@ async function main(): Promise<void> {
     } catch (err: unknown) {
       const errMsg = err instanceof Error ? err.message : String(err);
       bridge.sendRaw({ method: "ai/response", id, error: `AI handler error: ${errMsg}` });
+    }
+  });
+
+  // Register Image Enhance handler (Image Gen mode)
+  bridge.onMessage(async (msg) => {
+    if (msg.method !== "image/enhance") return;
+
+    const id = msg.id as string;
+    const params = msg.params as {
+      prompt?: string;
+      language?: string;
+      projectPath?: string;
+      geminiApiKey?: string;
+      geminiModel?: string;
+      referenceImagePath?: string;
+    } | undefined;
+
+    if (!id || !params?.prompt) {
+      console.error("[UnityAgent] Invalid image/enhance: missing id or prompt");
+      return;
+    }
+
+    // Load reference image from temp file
+    let refImageData: string | undefined;
+    if (params.referenceImagePath) {
+      try {
+        const { readFileSync } = await import("fs");
+        refImageData = readFileSync(params.referenceImagePath, "utf-8");
+      } catch (e) {
+        console.error(`[NanoBanana] Failed to read reference image: ${e}`);
+      }
+    }
+
+    // Update Gemini config
+    if (params.geminiApiKey) {
+      geminiConfig.apiKey = params.geminiApiKey;
+      geminiConfig.model = params.geminiModel || geminiConfig.model;
+    }
+
+    console.error(`[NanoBanana] Image enhance request: "${params.prompt.substring(0, 60)}..."`);
+
+    try {
+      // Step 1: Claude enhances the prompt (with multimodal ref image)
+      bridge.sendRaw({ method: "ai/status", id, status: "🎨 Claude is enhancing your prompt..." });
+
+      const enhanceResult = await handleImageEnhance({
+        prompt: params.prompt,
+        language: params.language,
+        referenceImage: refImageData,
+        onStatus: (status: string) => {
+          bridge.sendRaw({ method: "ai/status", id, status });
+        },
+      });
+
+      if (!enhanceResult.success || !enhanceResult.enhancedPrompt) {
+        bridge.sendRaw({ method: "ai/response", id, error: `Prompt enhance failed: ${enhanceResult.error}` });
+        return;
+      }
+
+      console.error(`[NanoBanana] Enhanced prompt: "${enhanceResult.enhancedPrompt.substring(0, 80)}..."`);
+
+      // Step 2: Generate image with Gemini using enhanced prompt
+      bridge.sendRaw({ method: "ai/status", id, status: "🖼️ Generating image with Gemini..." });
+
+      const imageResult = await generateImage({
+        apiKey: geminiConfig.apiKey,
+        model: geminiConfig.model,
+        prompt: refImageData
+          ? `Edit the provided image according to these instructions: ${enhanceResult.enhancedPrompt}`
+          : enhanceResult.enhancedPrompt,
+        referenceImage: refImageData,
+      });
+
+      if (imageResult.success && imageResult.imageBase64) {
+        // Send image to Unity
+        bridge.sendRaw({
+          method: "image/generated",
+          imageData: imageResult.imageBase64,
+          description: imageResult.description || `Generated: ${enhanceResult.enhancedPrompt.substring(0, 60)}`,
+        });
+
+        // Send completion with explanation
+        let responseText = "";
+        if (enhanceResult.explanation) {
+          responseText = enhanceResult.explanation;
+        }
+        responseText += `\n\nEnhanced prompt: "${enhanceResult.enhancedPrompt}"`;
+
+        bridge.sendRaw({ method: "ai/response", id, result: responseText });
+      } else {
+        bridge.sendRaw({ method: "ai/response", id, error: `Image generation failed: ${imageResult.error}` });
+      }
+    } catch (err: unknown) {
+      const errMsg = err instanceof Error ? err.message : String(err);
+      bridge.sendRaw({ method: "ai/response", id, error: `Image enhance error: ${errMsg}` });
     }
   });
 

@@ -180,3 +180,108 @@ function buildFullPrompt(
 
   return prompt;
 }
+
+interface ImageEnhanceRequest {
+  prompt: string;
+  language?: string;
+  referenceImage?: string; // base64 PNG
+  onStatus?: (status: string) => void;
+}
+
+interface ImageEnhanceResponse {
+  success: boolean;
+  enhancedPrompt?: string;
+  explanation?: string;
+  error?: string;
+}
+
+/**
+ * Enhance an image generation prompt using Claude with multimodal input.
+ * Claude sees the reference image (if any) and writes an optimized prompt for Gemini.
+ */
+export async function handleImageEnhance(
+  request: ImageEnhanceRequest
+): Promise<ImageEnhanceResponse> {
+  try {
+    request.onStatus?.("🎨 Claude is analyzing and enhancing your prompt...");
+
+    let resultText = "";
+
+    const systemPrompt =
+      "You are an expert AI image prompt engineer. Your job is to take a user's brief description " +
+      "and transform it into a detailed, optimized prompt for Google's Gemini image generation model (Nano Banana). " +
+      "If a reference image is provided, analyze it carefully and incorporate its visual characteristics into your prompt. " +
+      "Output ONLY the enhanced prompt text — no explanations, no markdown, no prefixes. " +
+      "The prompt should be in English for best results with Gemini, but add a brief explanation in the user's language after '---'. " +
+      "Format:\n[enhanced prompt in English]\n---\n[brief explanation in user's language]";
+
+    let languageNote = "";
+    if (request.language) {
+      languageNote = `\nThe user speaks ${request.language}. Write the explanation after --- in ${request.language}.`;
+    }
+
+    // Build multimodal message with AsyncIterable
+    async function* generateMessages() {
+      const contentParts: Array<unknown> = [];
+
+      // Add reference image if available
+      if (request.referenceImage) {
+        contentParts.push({
+          type: "image",
+          source: {
+            type: "base64",
+            media_type: "image/png",
+            data: request.referenceImage,
+          },
+        });
+        request.onStatus?.("🎨 Claude is analyzing your reference image...");
+      }
+
+      contentParts.push({
+        type: "text",
+        text:
+          systemPrompt +
+          languageNote +
+          `\n\nUser's description: "${request.prompt}"` +
+          (request.referenceImage
+            ? "\n\nA reference image is attached above. Analyze its style, colors, composition, and subject, then incorporate these into the enhanced prompt."
+            : ""),
+      });
+
+      yield {
+        type: "user" as const,
+        message: {
+          role: "user" as const,
+          content: contentParts,
+        },
+        parent_tool_use_id: null,
+        session_id: "",
+      };
+    }
+
+    for await (const msg of query({
+      prompt: generateMessages() as AsyncIterable<any>,
+      options: {
+        maxTurns: 1,
+      },
+    })) {
+      if (msg.type === "result") {
+        resultText = (msg as any).result ?? "";
+      }
+    }
+
+    // Parse result: split by ---
+    const parts = resultText.split("---");
+    const enhancedPrompt = parts[0].trim();
+    const explanation = parts.length > 1 ? parts.slice(1).join("---").trim() : "";
+
+    return {
+      success: true,
+      enhancedPrompt,
+      explanation,
+    };
+  } catch (err) {
+    const msg = err instanceof Error ? err.message : String(err);
+    return { success: false, error: msg };
+  }
+}
