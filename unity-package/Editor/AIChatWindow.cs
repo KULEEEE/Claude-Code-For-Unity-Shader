@@ -21,7 +21,6 @@ namespace UnityAgent.Editor
         private string _geminiApiKey = "";
         private int _modelIndex;
         private Texture2D _referenceImage;
-        private bool _showSettings;
 
         private static readonly string[] ModelLabels =
         {
@@ -70,12 +69,6 @@ namespace UnityAgent.Editor
         private void OnGUI()
         {
             DrawToolbar();
-
-            // Show settings panel only in Chat mode when toggled
-            bool isImageGen = _chatTab != null && _chatTab.IsImageGenMode;
-            if (_showSettings && !isImageGen)
-                DrawSettingsPanel();
-
             _chatTab?.OnGUI();
             DrawStatusBar();
         }
@@ -108,13 +101,6 @@ namespace UnityAgent.Editor
             EditorGUILayout.LabelField("Lang:", EditorStyles.miniLabel, GUILayout.Width(30));
             _languageIndex = EditorGUILayout.Popup(_languageIndex, LanguageLabels, EditorStyles.toolbarPopup, GUILayout.Width(65));
 
-            // Settings toggle
-            var settingsIcon = _showSettings ? "Settings (Hide)" : "Settings";
-            if (GUILayout.Button(settingsIcon, EditorStyles.toolbarButton, GUILayout.Width(80)))
-            {
-                _showSettings = !_showSettings;
-            }
-
             EditorGUILayout.EndHorizontal();
         }
 
@@ -122,15 +108,24 @@ namespace UnityAgent.Editor
 
         #region Settings Panel
 
-        private void DrawSettingsPanel()
+        /// <summary>Draw image gen settings inline (called by AIChatTab in Image Gen mode).</summary>
+        public new void DrawImageGenSettings()
         {
             EditorGUILayout.BeginVertical(EditorStyles.helpBox);
 
-            // Header
-            EditorGUILayout.LabelField("Nano Banana (Gemini Image)", EditorStyles.boldLabel);
-            EditorGUILayout.Space(2);
+            // Row 1: Model + API Key
+            EditorGUILayout.BeginHorizontal();
+            EditorGUILayout.LabelField("Model:", GUILayout.Width(45));
+            int newModel = EditorGUILayout.Popup(_modelIndex, ModelLabels, GUILayout.Width(160));
+            if (newModel != _modelIndex)
+            {
+                _modelIndex = newModel;
+                EditorPrefs.SetInt(PrefKeyModel, _modelIndex);
+                EditorPrefs.SetString("UnityAgent_GeminiModel", ModelIds[_modelIndex]);
+            }
+            EditorGUILayout.EndHorizontal();
 
-            // API Key
+            // Row 2: API Key input
             EditorGUILayout.BeginHorizontal();
             EditorGUILayout.LabelField("API Key:", GUILayout.Width(55));
             string newKey = EditorGUILayout.PasswordField(_geminiApiKey);
@@ -141,7 +136,6 @@ namespace UnityAgent.Editor
             }
             EditorGUILayout.EndHorizontal();
 
-            // API Key status
             if (string.IsNullOrEmpty(_geminiApiKey))
             {
                 var oldColor = GUI.color;
@@ -150,85 +144,7 @@ namespace UnityAgent.Editor
                 GUI.color = oldColor;
             }
 
-            // Model selection
-            EditorGUILayout.BeginHorizontal();
-            EditorGUILayout.LabelField("Model:", GUILayout.Width(55));
-            int newModel = EditorGUILayout.Popup(_modelIndex, ModelLabels);
-            if (newModel != _modelIndex)
-            {
-                _modelIndex = newModel;
-                EditorPrefs.SetInt(PrefKeyModel, _modelIndex);
-                EditorPrefs.SetString("UnityAgent_GeminiModel", ModelIds[_modelIndex]);
-            }
-            EditorGUILayout.EndHorizontal();
-
-            // Reference image
-            EditorGUILayout.BeginHorizontal();
-            EditorGUILayout.LabelField("Ref Image:", GUILayout.Width(70));
-            _referenceImage = (Texture2D)EditorGUILayout.ObjectField(
-                _referenceImage, typeof(Texture2D), false, GUILayout.Height(18));
-            if (_referenceImage != null)
-            {
-                if (GUILayout.Button("X", GUILayout.Width(20), GUILayout.Height(18)))
-                {
-                    _referenceImage = null;
-                }
-            }
-            EditorGUILayout.EndHorizontal();
-
-            // Reference image preview
-            if (_referenceImage != null)
-            {
-                var previewRect = GUILayoutUtility.GetRect(100, 80, GUILayout.ExpandWidth(false));
-                previewRect.x += 75;
-                previewRect.width = 80;
-                EditorGUI.DrawPreviewTexture(previewRect, _referenceImage, null, ScaleMode.ScaleToFit);
-                EditorGUILayout.Space(2);
-            }
-
-            EditorGUILayout.EndVertical();
-        }
-
-        /// <summary>Draw image gen settings inline (called by AIChatTab in Image Gen mode).</summary>
-        public new void DrawImageGenSettings()
-        {
-            EditorGUILayout.BeginVertical(EditorStyles.helpBox);
-
-            EditorGUILayout.BeginHorizontal();
-
-            // Model selection
-            EditorGUILayout.LabelField("Model:", GUILayout.Width(45));
-            int newModel = EditorGUILayout.Popup(_modelIndex, ModelLabels, GUILayout.Width(160));
-            if (newModel != _modelIndex)
-            {
-                _modelIndex = newModel;
-                EditorPrefs.SetInt(PrefKeyModel, _modelIndex);
-                EditorPrefs.SetString("UnityAgent_GeminiModel", ModelIds[_modelIndex]);
-            }
-
-            GUILayout.Space(8);
-
-            // API Key (compact)
-            EditorGUILayout.LabelField("Key:", GUILayout.Width(28));
-            bool hasKey = !string.IsNullOrEmpty(_geminiApiKey);
-            if (hasKey)
-            {
-                var oldColor = GUI.color;
-                GUI.color = ShaderInspectorStyles.GreenStatus;
-                EditorGUILayout.LabelField("Set", EditorStyles.miniLabel, GUILayout.Width(20));
-                GUI.color = oldColor;
-            }
-            else
-            {
-                var oldColor = GUI.color;
-                GUI.color = ShaderInspectorStyles.RedStatus;
-                EditorGUILayout.LabelField("None", EditorStyles.miniLabel, GUILayout.Width(30));
-                GUI.color = oldColor;
-            }
-
-            EditorGUILayout.EndHorizontal();
-
-            // Reference image
+            // Row 3: Reference image
             EditorGUILayout.BeginHorizontal();
             EditorGUILayout.LabelField("Ref Image:", GUILayout.Width(65));
             _referenceImage = (Texture2D)EditorGUILayout.ObjectField(
