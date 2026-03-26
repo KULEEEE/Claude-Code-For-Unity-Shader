@@ -36,7 +36,7 @@ import { registerEditorPlatformResource } from "./resources/editor-platform.js";
 async function main(): Promise<void> {
   const server = new McpServer({
     name: "unity-agent-tools",
-    version: "0.8.0",
+    version: "0.9.0",
   });
 
   const bridge = new UnityBridge("ws://localhost:8090");
@@ -85,6 +85,8 @@ async function main(): Promise<void> {
       geminiModel?: string;
       referenceImage?: string;
       referenceImagePath?: string;
+      imageBackend?: string;
+      comfyuiUrl?: string;
     } | undefined;
 
     if (!id || !params?.prompt) {
@@ -127,6 +129,8 @@ async function main(): Promise<void> {
         geminiApiKey: params.geminiApiKey,
         geminiModel: params.geminiModel,
         referenceImage: refImageData,
+        imageBackend: params.imageBackend,
+        comfyuiUrl: params.comfyuiUrl,
         onChunk: (chunk: string) => {
           bridge.sendRaw({ method: "ai/chunk", id, chunk });
         },
@@ -158,6 +162,8 @@ async function main(): Promise<void> {
       geminiApiKey?: string;
       geminiModel?: string;
       referenceImagePath?: string;
+      imageBackend?: string;
+      comfyuiUrl?: string;
     } | undefined;
 
     if (!id || !params?.prompt) {
@@ -172,7 +178,7 @@ async function main(): Promise<void> {
         const { readFileSync } = await import("fs");
         refImageData = readFileSync(params.referenceImagePath, "utf-8");
       } catch (e) {
-        console.error(`[NanoBanana] Failed to read reference image: ${e}`);
+        console.error("[ImageGen] Failed to read reference image: " + e);
       }
     }
 
@@ -182,7 +188,8 @@ async function main(): Promise<void> {
       geminiConfig.model = params.geminiModel || geminiConfig.model;
     }
 
-    console.error(`[NanoBanana] Image enhance request: "${params.prompt.substring(0, 60)}..."`);
+    const backend = params.imageBackend || "gemini";
+    console.error(`[ImageGen] Image enhance request (${backend}): "${params.prompt.substring(0, 60)}..."`);
 
     try {
       // Step 1: Claude enhances the prompt (with multimodal ref image)
@@ -202,35 +209,46 @@ async function main(): Promise<void> {
         return;
       }
 
-      console.error(`[NanoBanana] Enhanced prompt: "${enhanceResult.enhancedPrompt.substring(0, 80)}..."`);
+      console.error(`[ImageGen] Enhanced prompt: "${enhanceResult.enhancedPrompt.substring(0, 80)}..."`);
 
-      // Step 2: Generate image with Gemini using enhanced prompt
-      bridge.sendRaw({ method: "ai/status", id, status: "🖼️ Generating image with Gemini..." });
+      // Step 2: Generate image with selected backend
+      let imageResult: { success: boolean; imageBase64?: string; description?: string; error?: string };
 
-      const imageResult = await generateImage({
-        apiKey: geminiConfig.apiKey,
-        model: geminiConfig.model,
-        prompt: refImageData
-          ? `Edit the provided image according to these instructions: ${enhanceResult.enhancedPrompt}`
-          : enhanceResult.enhancedPrompt,
-        referenceImage: refImageData,
-      });
+      if (backend === "comfyui") {
+        bridge.sendRaw({ method: "ai/status", id, status: "🖼️ Generating image with ComfyUI..." });
+        const { generateImageComfyUI } = await import("./comfyui-handler.js");
+        imageResult = await generateImageComfyUI({
+          serverUrl: params.comfyuiUrl || "http://127.0.0.1:8188",
+          prompt: enhanceResult.enhancedPrompt,
+          referenceImage: refImageData,
+          onStatus: (status: string) => {
+            bridge.sendRaw({ method: "ai/status", id, status });
+          },
+        });
+      } else {
+        bridge.sendRaw({ method: "ai/status", id, status: "🖼️ Generating image with Gemini..." });
+        imageResult = await generateImage({
+          apiKey: geminiConfig.apiKey,
+          model: geminiConfig.model,
+          prompt: refImageData
+            ? `Edit the provided image according to these instructions: ${enhanceResult.enhancedPrompt}`
+            : enhanceResult.enhancedPrompt,
+          referenceImage: refImageData,
+        });
+      }
 
       if (imageResult.success && imageResult.imageBase64) {
-        // Send image to Unity
         bridge.sendRaw({
           method: "image/generated",
           imageData: imageResult.imageBase64,
           description: imageResult.description || `Generated: ${enhanceResult.enhancedPrompt.substring(0, 60)}`,
         });
 
-        // Send completion with explanation
         let responseText = "";
         if (enhanceResult.explanation) {
           responseText = enhanceResult.explanation;
         }
         responseText += `\n\nEnhanced prompt: "${enhanceResult.enhancedPrompt}"`;
-
         bridge.sendRaw({ method: "ai/response", id, result: responseText });
       } else {
         bridge.sendRaw({ method: "ai/response", id, error: `Image generation failed: ${imageResult.error}` });

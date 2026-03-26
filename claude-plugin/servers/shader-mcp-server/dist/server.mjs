@@ -12,6 +12,9 @@ var __require = /* @__PURE__ */ ((x) => typeof require !== "undefined" ? require
   if (typeof require !== "undefined") return require.apply(this, arguments);
   throw Error('Dynamic require of "' + x + '" is not supported');
 });
+var __esm = (fn, res) => function __init() {
+  return fn && (res = (0, fn[__getOwnPropNames(fn)[0]])(fn = 0)), res;
+};
 var __commonJS = (cb, mod) => function __require2() {
   return mod || (0, cb[__getOwnPropNames(cb)[0]])((mod = { exports: {} }).exports, mod), mod.exports;
 };
@@ -16702,6 +16705,293 @@ var require_node2 = __commonJS({
   }
 });
 
+// build/comfyui-handler.js
+var comfyui_handler_exports = {};
+__export(comfyui_handler_exports, {
+  generateImageComfyUI: () => generateImageComfyUI
+});
+import { randomUUID as randomUUID2 } from "crypto";
+async function generateImageComfyUI(request) {
+  const { serverUrl, prompt, referenceImage, onStatus } = request;
+  const baseUrl = serverUrl.replace(/\/+$/, "");
+  try {
+    onStatus?.("\u{1F517} Connecting to ComfyUI...");
+    try {
+      const healthCheck = await fetch(`${baseUrl}/system_stats`, {
+        signal: AbortSignal.timeout(5e3)
+      });
+      if (!healthCheck.ok)
+        throw new Error(`HTTP ${healthCheck.status}`);
+    } catch {
+      return {
+        success: false,
+        error: `Cannot connect to ComfyUI at ${baseUrl}. Ensure ComfyUI is running.`
+      };
+    }
+    onStatus?.("\u{1F4E6} Finding checkpoint model...");
+    const checkpoint = await findCheckpoint(baseUrl);
+    if (!checkpoint) {
+      return {
+        success: false,
+        error: "No checkpoint models found in ComfyUI. Please install a model (e.g., SDXL) to the models/checkpoints folder."
+      };
+    }
+    console.error(`[ComfyUI] Using checkpoint: ${checkpoint}`);
+    let uploadedImageName;
+    if (referenceImage) {
+      onStatus?.("\u{1F4E4} Uploading reference image...");
+      uploadedImageName = await uploadImage(baseUrl, referenceImage) ?? void 0;
+      if (!uploadedImageName) {
+        console.error("[ComfyUI] Failed to upload reference image, proceeding with txt2img");
+      }
+    }
+    const clientId = randomUUID2();
+    const workflow = uploadedImageName ? buildImg2ImgWorkflow(checkpoint, prompt, uploadedImageName) : buildTxt2ImgWorkflow(checkpoint, prompt);
+    onStatus?.("\u2699\uFE0F Generating with ComfyUI...");
+    const submitResponse = await fetch(`${baseUrl}/prompt`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ prompt: workflow, client_id: clientId })
+    });
+    if (!submitResponse.ok) {
+      const errorText = await submitResponse.text();
+      return {
+        success: false,
+        error: `ComfyUI prompt submission failed: ${errorText.substring(0, 200)}`
+      };
+    }
+    const submitData = await submitResponse.json();
+    if (!submitData.prompt_id) {
+      return { success: false, error: `ComfyUI error: ${submitData.error || "No prompt_id returned"}` };
+    }
+    const promptId = submitData.prompt_id;
+    console.error(`[ComfyUI] Prompt submitted: ${promptId}`);
+    const imageFilename = await pollForResult(baseUrl, promptId, onStatus);
+    if (!imageFilename) {
+      return { success: false, error: "ComfyUI generation timed out or failed." };
+    }
+    onStatus?.("\u{1F4E5} Downloading generated image...");
+    const imageBase64 = await fetchImage(baseUrl, imageFilename);
+    if (!imageBase64) {
+      return { success: false, error: "Failed to download generated image from ComfyUI." };
+    }
+    console.error("[ComfyUI] Image generated successfully.");
+    return {
+      success: true,
+      imageBase64,
+      description: `Generated with ComfyUI (${checkpoint})`
+    };
+  } catch (err) {
+    const msg = err instanceof Error ? err.message : String(err);
+    console.error(`[ComfyUI] Error: ${msg}`);
+    return { success: false, error: `ComfyUI error: ${msg}` };
+  }
+}
+async function findCheckpoint(baseUrl) {
+  try {
+    const response = await fetch(`${baseUrl}/object_info/CheckpointLoaderSimple`);
+    if (!response.ok)
+      return null;
+    const data = await response.json();
+    const inputs = data?.CheckpointLoaderSimple?.input?.required?.ckpt_name;
+    if (Array.isArray(inputs) && Array.isArray(inputs[0]) && inputs[0].length > 0) {
+      return inputs[0][0];
+    }
+    return null;
+  } catch {
+    return null;
+  }
+}
+async function uploadImage(baseUrl, base64Data) {
+  try {
+    const imageBuffer = Buffer.from(base64Data, "base64");
+    const filename = `unity_ref_${Date.now()}.png`;
+    const formData = new FormData();
+    formData.append("image", new Blob([imageBuffer], { type: "image/png" }), filename);
+    formData.append("overwrite", "true");
+    const response = await fetch(`${baseUrl}/upload/image`, {
+      method: "POST",
+      body: formData
+    });
+    if (!response.ok)
+      return null;
+    const data = await response.json();
+    return data.name || filename;
+  } catch {
+    return null;
+  }
+}
+function buildTxt2ImgWorkflow(checkpoint, prompt) {
+  return {
+    "4": {
+      class_type: "CheckpointLoaderSimple",
+      inputs: { ckpt_name: checkpoint }
+    },
+    "6": {
+      class_type: "CLIPTextEncode",
+      inputs: {
+        text: prompt,
+        clip: ["4", 1]
+      }
+    },
+    "7": {
+      class_type: "CLIPTextEncode",
+      inputs: {
+        text: "blurry, low quality, distorted, deformed, ugly, watermark",
+        clip: ["4", 1]
+      }
+    },
+    "5": {
+      class_type: "EmptyLatentImage",
+      inputs: { width: 1024, height: 1024, batch_size: 1 }
+    },
+    "3": {
+      class_type: "KSampler",
+      inputs: {
+        seed: Math.floor(Math.random() * 2 ** 32),
+        steps: 20,
+        cfg: 7,
+        sampler_name: "euler",
+        scheduler: "normal",
+        denoise: 1,
+        model: ["4", 0],
+        positive: ["6", 0],
+        negative: ["7", 0],
+        latent_image: ["5", 0]
+      }
+    },
+    "8": {
+      class_type: "VAEDecode",
+      inputs: {
+        samples: ["3", 0],
+        vae: ["4", 2]
+      }
+    },
+    "9": {
+      class_type: "SaveImage",
+      inputs: {
+        filename_prefix: "UnityAgent",
+        images: ["8", 0]
+      }
+    }
+  };
+}
+function buildImg2ImgWorkflow(checkpoint, prompt, inputImageName) {
+  return {
+    "4": {
+      class_type: "CheckpointLoaderSimple",
+      inputs: { ckpt_name: checkpoint }
+    },
+    "6": {
+      class_type: "CLIPTextEncode",
+      inputs: {
+        text: prompt,
+        clip: ["4", 1]
+      }
+    },
+    "7": {
+      class_type: "CLIPTextEncode",
+      inputs: {
+        text: "blurry, low quality, distorted, deformed, ugly, watermark",
+        clip: ["4", 1]
+      }
+    },
+    "10": {
+      class_type: "LoadImage",
+      inputs: { image: inputImageName }
+    },
+    "11": {
+      class_type: "VAEEncode",
+      inputs: {
+        pixels: ["10", 0],
+        vae: ["4", 2]
+      }
+    },
+    "3": {
+      class_type: "KSampler",
+      inputs: {
+        seed: Math.floor(Math.random() * 2 ** 32),
+        steps: 20,
+        cfg: 7,
+        sampler_name: "euler",
+        scheduler: "normal",
+        denoise: 0.7,
+        model: ["4", 0],
+        positive: ["6", 0],
+        negative: ["7", 0],
+        latent_image: ["11", 0]
+      }
+    },
+    "8": {
+      class_type: "VAEDecode",
+      inputs: {
+        samples: ["3", 0],
+        vae: ["4", 2]
+      }
+    },
+    "9": {
+      class_type: "SaveImage",
+      inputs: {
+        filename_prefix: "UnityAgent",
+        images: ["8", 0]
+      }
+    }
+  };
+}
+async function pollForResult(baseUrl, promptId, onStatus) {
+  const maxWait = 12e4;
+  const pollInterval = 2e3;
+  const startTime = Date.now();
+  while (Date.now() - startTime < maxWait) {
+    await new Promise((r) => setTimeout(r, pollInterval));
+    const elapsed = Math.round((Date.now() - startTime) / 1e3);
+    onStatus?.(`\u2699\uFE0F ComfyUI generating... (${elapsed}s)`);
+    try {
+      const response = await fetch(`${baseUrl}/history/${promptId}`);
+      if (!response.ok)
+        continue;
+      const data = await response.json();
+      const entry = data[promptId];
+      if (!entry)
+        continue;
+      const outputs = entry.outputs;
+      if (outputs) {
+        for (const nodeId of Object.keys(outputs)) {
+          const nodeOutput = outputs[nodeId];
+          if (nodeOutput.images && nodeOutput.images.length > 0) {
+            const img = nodeOutput.images[0];
+            return `${img.filename}|${img.subfolder || ""}|${img.type || "output"}`;
+          }
+        }
+      }
+    } catch {
+    }
+  }
+  return null;
+}
+async function fetchImage(baseUrl, imageInfo) {
+  try {
+    const [filename, subfolder, type] = imageInfo.split("|");
+    const params = new URLSearchParams({
+      filename,
+      subfolder: subfolder || "",
+      type: type || "output"
+    });
+    const response = await fetch(`${baseUrl}/view?${params}`);
+    if (!response.ok)
+      return null;
+    const buffer = Buffer.from(await response.arrayBuffer());
+    return buffer.toString("base64");
+  } catch {
+    return null;
+  }
+}
+var init_comfyui_handler = __esm({
+  "build/comfyui-handler.js"() {
+    "use strict";
+  }
+});
+
 // node_modules/zod/v3/external.js
 var external_exports = {};
 __export(external_exports, {
@@ -31188,6 +31478,10 @@ async function handleAIQuery(request) {
     process.env.GEMINI_API_KEY = request.geminiApiKey;
   if (request.geminiModel)
     process.env.GEMINI_MODEL = request.geminiModel;
+  if (request.imageBackend)
+    process.env.IMAGE_BACKEND = request.imageBackend;
+  if (request.comfyuiUrl)
+    process.env.COMFYUI_URL = request.comfyuiUrl;
   let refImageTempPath;
   if (request.referenceImage) {
     refImageTempPath = join(tmpdir(), `unity-agent-ref-${Date.now()}.b64`);
@@ -31997,31 +32291,54 @@ var geminiConfig = {
   },
   _referenceImage: void 0
 };
+var comfyuiConfig = {
+  get url() {
+    return process.env.COMFYUI_URL || this._url;
+  },
+  set url(v) {
+    this._url = v;
+  },
+  _url: "http://127.0.0.1:8188"
+};
+function getBackend() {
+  return process.env.IMAGE_BACKEND || "gemini";
+}
 function registerGenerateImageTool(server, bridge) {
-  server.tool("generate_image", "Generate an image using Google's Nano Banana (Gemini Image Generation). Use this when the user asks to create, generate, or make an image, texture, sprite, icon, or visual asset. The generated image will be displayed in the Unity Editor's AI Chat window where the user can save it to their project. You should describe what you're generating and call this tool with a detailed prompt.", {
+  server.tool("generate_image", "Generate an image using the configured backend (Nano Banana/Gemini or ComfyUI). Use this when the user asks to create, generate, or make an image, texture, sprite, icon, or visual asset. The generated image will be displayed in the Unity Editor's AI Chat window where the user can save it to their project. You should describe what you're generating and call this tool with a detailed prompt.", {
     prompt: external_exports.string().describe("Detailed image generation prompt. Be specific about style, colors, composition, and content. For game textures, include terms like 'seamless', 'tileable', 'PBR', etc."),
     useReferenceImage: external_exports.boolean().optional().describe("Whether to include the user's reference image (if one is set in the UI). Default: true if available.")
   }, async ({ prompt, useReferenceImage }) => {
-    if (!geminiConfig.apiKey) {
+    const backend = getBackend();
+    const shouldUseRef = useReferenceImage !== false;
+    const refImage = shouldUseRef && geminiConfig.referenceImage ? geminiConfig.referenceImage : void 0;
+    if (backend === "gemini" && !geminiConfig.apiKey) {
       return {
         content: [
           {
             type: "text",
-            text: "Error: Gemini API key is not configured. The user needs to set it in AI Chat > Settings panel."
+            text: "Error: Gemini API key is not configured. The user needs to set it in AI Chat > Image Gen settings."
           }
         ],
         isError: true
       };
     }
     try {
-      const shouldUseRef = useReferenceImage !== false;
-      const refImage = shouldUseRef && geminiConfig.referenceImage ? geminiConfig.referenceImage : void 0;
-      const result = await generateImage({
-        apiKey: geminiConfig.apiKey,
-        model: geminiConfig.model,
-        prompt,
-        referenceImage: refImage
-      });
+      let result;
+      if (backend === "comfyui") {
+        const { generateImageComfyUI: generateImageComfyUI2 } = await Promise.resolve().then(() => (init_comfyui_handler(), comfyui_handler_exports));
+        result = await generateImageComfyUI2({
+          serverUrl: comfyuiConfig.url,
+          prompt,
+          referenceImage: refImage
+        });
+      } else {
+        result = await generateImage({
+          apiKey: geminiConfig.apiKey,
+          model: geminiConfig.model,
+          prompt,
+          referenceImage: refImage
+        });
+      }
       if (result.success && result.imageBase64) {
         bridge.sendRaw({
           method: "image/generated",
@@ -32193,7 +32510,7 @@ function registerEditorPlatformResource(server, bridge) {
 async function main() {
   const server = new McpServer({
     name: "unity-agent-tools",
-    version: "0.8.0"
+    version: "0.9.0"
   });
   const bridge = new UnityBridge("ws://localhost:8090");
   const lspClient = new ShaderLspClient();
@@ -32252,6 +32569,8 @@ async function main() {
         geminiApiKey: params.geminiApiKey,
         geminiModel: params.geminiModel,
         referenceImage: refImageData,
+        imageBackend: params.imageBackend,
+        comfyuiUrl: params.comfyuiUrl,
         onChunk: (chunk) => {
           bridge.sendRaw({ method: "ai/chunk", id, chunk });
         },
@@ -32284,14 +32603,15 @@ async function main() {
         const { readFileSync: readFileSync3 } = await import("fs");
         refImageData = readFileSync3(params.referenceImagePath, "utf-8");
       } catch (e) {
-        console.error(`[NanoBanana] Failed to read reference image: ${e}`);
+        console.error("[ImageGen] Failed to read reference image: " + e);
       }
     }
     if (params.geminiApiKey) {
       geminiConfig.apiKey = params.geminiApiKey;
       geminiConfig.model = params.geminiModel || geminiConfig.model;
     }
-    console.error(`[NanoBanana] Image enhance request: "${params.prompt.substring(0, 60)}..."`);
+    const backend = params.imageBackend || "gemini";
+    console.error(`[ImageGen] Image enhance request (${backend}): "${params.prompt.substring(0, 60)}..."`);
     try {
       bridge.sendRaw({ method: "ai/status", id, status: "\u{1F3A8} Claude is enhancing your prompt..." });
       const enhanceResult = await handleImageEnhance({
@@ -32306,14 +32626,28 @@ async function main() {
         bridge.sendRaw({ method: "ai/response", id, error: `Prompt enhance failed: ${enhanceResult.error}` });
         return;
       }
-      console.error(`[NanoBanana] Enhanced prompt: "${enhanceResult.enhancedPrompt.substring(0, 80)}..."`);
-      bridge.sendRaw({ method: "ai/status", id, status: "\u{1F5BC}\uFE0F Generating image with Gemini..." });
-      const imageResult = await generateImage({
-        apiKey: geminiConfig.apiKey,
-        model: geminiConfig.model,
-        prompt: refImageData ? `Edit the provided image according to these instructions: ${enhanceResult.enhancedPrompt}` : enhanceResult.enhancedPrompt,
-        referenceImage: refImageData
-      });
+      console.error(`[ImageGen] Enhanced prompt: "${enhanceResult.enhancedPrompt.substring(0, 80)}..."`);
+      let imageResult;
+      if (backend === "comfyui") {
+        bridge.sendRaw({ method: "ai/status", id, status: "\u{1F5BC}\uFE0F Generating image with ComfyUI..." });
+        const { generateImageComfyUI: generateImageComfyUI2 } = await Promise.resolve().then(() => (init_comfyui_handler(), comfyui_handler_exports));
+        imageResult = await generateImageComfyUI2({
+          serverUrl: params.comfyuiUrl || "http://127.0.0.1:8188",
+          prompt: enhanceResult.enhancedPrompt,
+          referenceImage: refImageData,
+          onStatus: (status) => {
+            bridge.sendRaw({ method: "ai/status", id, status });
+          }
+        });
+      } else {
+        bridge.sendRaw({ method: "ai/status", id, status: "\u{1F5BC}\uFE0F Generating image with Gemini..." });
+        imageResult = await generateImage({
+          apiKey: geminiConfig.apiKey,
+          model: geminiConfig.model,
+          prompt: refImageData ? `Edit the provided image according to these instructions: ${enhanceResult.enhancedPrompt}` : enhanceResult.enhancedPrompt,
+          referenceImage: refImageData
+        });
+      }
       if (imageResult.success && imageResult.imageBase64) {
         bridge.sendRaw({
           method: "image/generated",

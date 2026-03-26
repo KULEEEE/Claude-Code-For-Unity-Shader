@@ -9,9 +9,11 @@ namespace UnityAgent.Editor
         void Repaint();
         string SelectedLanguage { get; }
 
-        // Nano Banana (Gemini Image) settings — optional
+        // Image generation settings — optional
+        string ImageBackend => "gemini";  // "gemini" or "comfyui"
         string GeminiApiKey => null;
         string GeminiModel => null;
+        string ComfyUIUrl => "http://127.0.0.1:8188";
         UnityEngine.Texture2D ReferenceImage => null;
         void DrawImageGenSettings() {}
     }

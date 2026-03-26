@@ -22,6 +22,13 @@ namespace UnityAgent.Editor
         private int _modelIndex;
         private Texture2D _referenceImage;
 
+        // Backend selection
+        private int _backendIndex;
+        private string _comfyuiUrl = "http://127.0.0.1:8188";
+
+        private static readonly string[] BackendLabels = { "Nano Banana (Gemini)", "ComfyUI (Local)" };
+        private static readonly string[] BackendIds = { "gemini", "comfyui" };
+
         private static readonly string[] ModelLabels =
         {
             "[FREE] Nano Banana",
@@ -38,10 +45,14 @@ namespace UnityAgent.Editor
         // EditorPrefs keys
         private const string PrefKeyApiKey = "UnityAgent_GeminiApiKey";
         private const string PrefKeyModel = "UnityAgent_GeminiModel";
+        private const string PrefKeyBackend = "UnityAgent_ImageBackend";
+        private const string PrefKeyComfyUrl = "UnityAgent_ComfyUIUrl";
 
-        // IChatHost - Nano Banana properties
+        // IChatHost properties
+        public string ImageBackend => BackendIds[_backendIndex];
         public string GeminiApiKey => _geminiApiKey;
         public string GeminiModel => ModelIds[_modelIndex];
+        public string ComfyUIUrl => _comfyuiUrl;
         public Texture2D ReferenceImage => _referenceImage;
 
         // Connection state
@@ -64,6 +75,8 @@ namespace UnityAgent.Editor
             // Load saved settings
             _geminiApiKey = EditorPrefs.GetString(PrefKeyApiKey, "");
             _modelIndex = EditorPrefs.GetInt(PrefKeyModel, 0);
+            _backendIndex = EditorPrefs.GetInt(PrefKeyBackend, 0);
+            _comfyuiUrl = EditorPrefs.GetString(PrefKeyComfyUrl, "http://127.0.0.1:8188");
         }
 
         private void OnGUI()
@@ -113,38 +126,66 @@ namespace UnityAgent.Editor
         {
             EditorGUILayout.BeginVertical(EditorStyles.helpBox);
 
-            // Row 1: Model + API Key
+            // Row 1: Backend selection
             EditorGUILayout.BeginHorizontal();
-            EditorGUILayout.LabelField("Model:", GUILayout.Width(45));
-            int newModel = EditorGUILayout.Popup(_modelIndex, ModelLabels, GUILayout.Width(160));
-            if (newModel != _modelIndex)
+            EditorGUILayout.LabelField("Backend:", GUILayout.Width(55));
+            int newBackend = EditorGUILayout.Popup(_backendIndex, BackendLabels);
+            if (newBackend != _backendIndex)
             {
-                _modelIndex = newModel;
-                EditorPrefs.SetInt(PrefKeyModel, _modelIndex);
-                EditorPrefs.SetString("UnityAgent_GeminiModel", ModelIds[_modelIndex]);
+                _backendIndex = newBackend;
+                EditorPrefs.SetInt(PrefKeyBackend, _backendIndex);
+                EditorPrefs.SetString("UnityAgent_ImageBackend", BackendIds[_backendIndex]);
             }
             EditorGUILayout.EndHorizontal();
 
-            // Row 2: API Key input
-            EditorGUILayout.BeginHorizontal();
-            EditorGUILayout.LabelField("API Key:", GUILayout.Width(55));
-            string newKey = EditorGUILayout.PasswordField(_geminiApiKey);
-            if (newKey != _geminiApiKey)
+            if (_backendIndex == 0) // Gemini
             {
-                _geminiApiKey = newKey;
-                EditorPrefs.SetString(PrefKeyApiKey, _geminiApiKey);
-            }
-            EditorGUILayout.EndHorizontal();
+                // Model selection
+                EditorGUILayout.BeginHorizontal();
+                EditorGUILayout.LabelField("Model:", GUILayout.Width(55));
+                int newModel = EditorGUILayout.Popup(_modelIndex, ModelLabels);
+                if (newModel != _modelIndex)
+                {
+                    _modelIndex = newModel;
+                    EditorPrefs.SetInt(PrefKeyModel, _modelIndex);
+                    EditorPrefs.SetString("UnityAgent_GeminiModel", ModelIds[_modelIndex]);
+                }
+                EditorGUILayout.EndHorizontal();
 
-            if (string.IsNullOrEmpty(_geminiApiKey))
+                // API Key
+                EditorGUILayout.BeginHorizontal();
+                EditorGUILayout.LabelField("API Key:", GUILayout.Width(55));
+                string newKey = EditorGUILayout.PasswordField(_geminiApiKey);
+                if (newKey != _geminiApiKey)
+                {
+                    _geminiApiKey = newKey;
+                    EditorPrefs.SetString(PrefKeyApiKey, _geminiApiKey);
+                }
+                EditorGUILayout.EndHorizontal();
+
+                if (string.IsNullOrEmpty(_geminiApiKey))
+                {
+                    var oldColor = GUI.color;
+                    GUI.color = ShaderInspectorStyles.YellowStatus;
+                    EditorGUILayout.LabelField("Get your key at: aistudio.google.com", EditorStyles.miniLabel);
+                    GUI.color = oldColor;
+                }
+            }
+            else // ComfyUI
             {
-                var oldColor = GUI.color;
-                GUI.color = ShaderInspectorStyles.YellowStatus;
-                EditorGUILayout.LabelField("Get your key at: aistudio.google.com", EditorStyles.miniLabel);
-                GUI.color = oldColor;
+                // Server URL
+                EditorGUILayout.BeginHorizontal();
+                EditorGUILayout.LabelField("Server:", GUILayout.Width(55));
+                string newUrl = EditorGUILayout.TextField(_comfyuiUrl);
+                if (newUrl != _comfyuiUrl)
+                {
+                    _comfyuiUrl = newUrl;
+                    EditorPrefs.SetString(PrefKeyComfyUrl, _comfyuiUrl);
+                }
+                EditorGUILayout.EndHorizontal();
             }
 
-            // Row 3: Reference image
+            // Reference image (common)
             EditorGUILayout.BeginHorizontal();
             EditorGUILayout.LabelField("Ref Image:", GUILayout.Width(65));
             _referenceImage = (Texture2D)EditorGUILayout.ObjectField(
@@ -179,16 +220,25 @@ namespace UnityAgent.Editor
             GUILayout.FlexibleSpace();
             EditorGUILayout.BeginHorizontal(ShaderInspectorStyles.StatusBar);
 
-            // Nano Banana status
-            bool hasKey = !string.IsNullOrEmpty(_geminiApiKey);
+            // Backend status
             var oldColor = GUI.color;
-            GUI.color = hasKey ? ShaderInspectorStyles.GreenStatus : ShaderInspectorStyles.DimText;
-            GUILayout.Label(hasKey ? "IMG: Ready" : "IMG: No Key");
-            GUI.color = oldColor;
-
-            GUILayout.Label("|");
-
-            GUILayout.Label(ModelLabels[_modelIndex], EditorStyles.miniLabel);
+            if (_backendIndex == 0) // Gemini
+            {
+                bool hasKey = !string.IsNullOrEmpty(_geminiApiKey);
+                GUI.color = hasKey ? ShaderInspectorStyles.GreenStatus : ShaderInspectorStyles.DimText;
+                GUILayout.Label(hasKey ? "IMG: Ready" : "IMG: No Key");
+                GUI.color = oldColor;
+                GUILayout.Label("|");
+                GUILayout.Label(ModelLabels[_modelIndex], EditorStyles.miniLabel);
+            }
+            else // ComfyUI
+            {
+                GUI.color = ShaderInspectorStyles.CyanStatus;
+                GUILayout.Label("IMG: ComfyUI");
+                GUI.color = oldColor;
+                GUILayout.Label("|");
+                GUILayout.Label(_comfyuiUrl, EditorStyles.miniLabel);
+            }
 
             GUILayout.FlexibleSpace();
 

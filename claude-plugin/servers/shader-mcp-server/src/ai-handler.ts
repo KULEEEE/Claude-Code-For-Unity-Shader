@@ -12,6 +12,8 @@ interface AIRequest {
   geminiApiKey?: string;
   geminiModel?: string;
   referenceImage?: string;
+  imageBackend?: string;
+  comfyuiUrl?: string;
   onChunk?: (chunk: string) => void;
   onStatus?: (status: string) => void;
 }
@@ -45,6 +47,8 @@ export async function handleAIQuery(request: AIRequest): Promise<AIResponse> {
   // Set Gemini config in process.env so child processes inherit them
   if (request.geminiApiKey) process.env.GEMINI_API_KEY = request.geminiApiKey;
   if (request.geminiModel) process.env.GEMINI_MODEL = request.geminiModel;
+  if (request.imageBackend) process.env.IMAGE_BACKEND = request.imageBackend;
+  if (request.comfyuiUrl) process.env.COMFYUI_URL = request.comfyuiUrl;
 
   // Write reference image to temp file (too large for env var)
   let refImageTempPath: string | undefined;

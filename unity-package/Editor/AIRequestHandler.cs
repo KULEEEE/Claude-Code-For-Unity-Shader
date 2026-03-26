@@ -83,7 +83,15 @@ namespace UnityAgent.Editor
                 System.IO.Path.Combine(UnityEngine.Application.dataPath, ".."));
             msgBuilder.Key("projectPath").Value(projectPath);
 
-            // Nano Banana (Gemini Image) settings
+            // Image backend settings
+            string imageBackend = EditorPrefs.GetString("UnityAgent_ImageBackend", "gemini");
+            msgBuilder.Key("imageBackend").Value(imageBackend);
+            if (imageBackend == "comfyui")
+            {
+                string comfyUrl = EditorPrefs.GetString("UnityAgent_ComfyUIUrl", "http://127.0.0.1:8188");
+                msgBuilder.Key("comfyuiUrl").Value(comfyUrl);
+            }
+
             string geminiApiKey = EditorPrefs.GetString("UnityAgent_GeminiApiKey", "");
             string geminiModel = EditorPrefs.GetString("UnityAgent_GeminiModel", "");
             if (!string.IsNullOrEmpty(geminiApiKey))
@@ -156,14 +164,23 @@ namespace UnityAgent.Editor
                 System.IO.Path.Combine(UnityEngine.Application.dataPath, ".."));
             msgBuilder.Key("projectPath").Value(projectPath);
 
-            // Gemini settings
-            string geminiApiKey = EditorPrefs.GetString("UnityAgent_GeminiApiKey", "");
-            string geminiModel = EditorPrefs.GetString("UnityAgent_GeminiModel", "");
-            if (!string.IsNullOrEmpty(geminiApiKey))
+            // Backend settings
+            string imageBackend2 = EditorPrefs.GetString("UnityAgent_ImageBackend", "gemini");
+            msgBuilder.Key("imageBackend").Value(imageBackend2);
+
+            if (imageBackend2 == "comfyui")
             {
-                msgBuilder.Key("geminiApiKey").Value(geminiApiKey);
+                string comfyUrl = EditorPrefs.GetString("UnityAgent_ComfyUIUrl", "http://127.0.0.1:8188");
+                msgBuilder.Key("comfyuiUrl").Value(comfyUrl);
+            }
+
+            string geminiApiKey2 = EditorPrefs.GetString("UnityAgent_GeminiApiKey", "");
+            string geminiModel2 = EditorPrefs.GetString("UnityAgent_GeminiModel", "");
+            if (!string.IsNullOrEmpty(geminiApiKey2))
+            {
+                msgBuilder.Key("geminiApiKey").Value(geminiApiKey2);
                 msgBuilder.Key("geminiModel").Value(
-                    !string.IsNullOrEmpty(geminiModel) ? geminiModel : "gemini-2.5-flash-image");
+                    !string.IsNullOrEmpty(geminiModel2) ? geminiModel2 : "gemini-2.5-flash-image");
             }
 
             // Reference image path

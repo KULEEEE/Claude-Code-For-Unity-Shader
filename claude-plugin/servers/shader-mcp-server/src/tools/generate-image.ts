@@ -34,13 +34,25 @@ export const geminiConfig = {
   _referenceImage: undefined as string | undefined,
 };
 
+export const comfyuiConfig = {
+  get url(): string {
+    return process.env.COMFYUI_URL || this._url;
+  },
+  set url(v: string) { this._url = v; },
+  _url: "http://127.0.0.1:8188",
+};
+
+function getBackend(): string {
+  return process.env.IMAGE_BACKEND || "gemini";
+}
+
 export function registerGenerateImageTool(
   server: McpServer,
   bridge: UnityBridge
 ): void {
   server.tool(
     "generate_image",
-    "Generate an image using Google's Nano Banana (Gemini Image Generation). " +
+    "Generate an image using the configured backend (Nano Banana/Gemini or ComfyUI). " +
       "Use this when the user asks to create, generate, or make an image, texture, sprite, icon, or visual asset. " +
       "The generated image will be displayed in the Unity Editor's AI Chat window where the user can save it to their project. " +
       "You should describe what you're generating and call this tool with a detailed prompt.",
@@ -59,12 +71,19 @@ export function registerGenerateImageTool(
         ),
     },
     async ({ prompt, useReferenceImage }) => {
-      if (!geminiConfig.apiKey) {
+      const backend = getBackend();
+      const shouldUseRef = useReferenceImage !== false;
+      const refImage =
+        shouldUseRef && geminiConfig.referenceImage
+          ? geminiConfig.referenceImage
+          : undefined;
+
+      if (backend === "gemini" && !geminiConfig.apiKey) {
         return {
           content: [
             {
               type: "text" as const,
-              text: "Error: Gemini API key is not configured. The user needs to set it in AI Chat > Settings panel.",
+              text: "Error: Gemini API key is not configured. The user needs to set it in AI Chat > Image Gen settings.",
             },
           ],
           isError: true,
@@ -72,18 +91,23 @@ export function registerGenerateImageTool(
       }
 
       try {
-        const shouldUseRef = useReferenceImage !== false;
-        const refImage =
-          shouldUseRef && geminiConfig.referenceImage
-            ? geminiConfig.referenceImage
-            : undefined;
+        let result: { success: boolean; imageBase64?: string; description?: string; error?: string };
 
-        const result = await generateImage({
-          apiKey: geminiConfig.apiKey,
-          model: geminiConfig.model,
-          prompt,
-          referenceImage: refImage,
-        });
+        if (backend === "comfyui") {
+          const { generateImageComfyUI } = await import("../comfyui-handler.js");
+          result = await generateImageComfyUI({
+            serverUrl: comfyuiConfig.url,
+            prompt,
+            referenceImage: refImage,
+          });
+        } else {
+          result = await generateImage({
+            apiKey: geminiConfig.apiKey,
+            model: geminiConfig.model,
+            prompt,
+            referenceImage: refImage,
+          });
+        }
 
         if (result.success && result.imageBase64) {
           // Send the image to Unity for display
