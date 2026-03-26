@@ -30,6 +30,7 @@ namespace UnityAgent.Editor
 
         // Mode toggle
         private bool _imageGenMode;
+        public bool IsImageGenMode => _imageGenMode;
 
         // Quick presets
         private bool _showQuickMenu;
@@ -277,15 +278,13 @@ namespace UnityAgent.Editor
                 _imageGenMode = true;
             GUILayout.FlexibleSpace();
 
+            EditorGUILayout.EndHorizontal();
+
+            // Image Gen mode: show settings inline
             if (_imageGenMode)
             {
-                var oldColor = GUI.color;
-                GUI.color = ShaderInspectorStyles.CyanStatus;
-                EditorGUILayout.LabelField("Claude enhances prompt + Gemini generates", EditorStyles.miniLabel);
-                GUI.color = oldColor;
+                _host.DrawImageGenSettings();
             }
-
-            EditorGUILayout.EndHorizontal();
 
             // Quick presets (Chat mode only)
             if (!_imageGenMode && _showQuickMenu)

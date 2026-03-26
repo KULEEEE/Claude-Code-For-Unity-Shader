@@ -71,7 +71,9 @@ namespace UnityAgent.Editor
         {
             DrawToolbar();
 
-            if (_showSettings)
+            // Show settings panel only in Chat mode when toggled
+            bool isImageGen = _chatTab != null && _chatTab.IsImageGenMode;
+            if (_showSettings && !isImageGen)
                 DrawSettingsPanel();
 
             _chatTab?.OnGUI();
@@ -182,6 +184,71 @@ namespace UnityAgent.Editor
                 previewRect.width = 80;
                 EditorGUI.DrawPreviewTexture(previewRect, _referenceImage, null, ScaleMode.ScaleToFit);
                 EditorGUILayout.Space(2);
+            }
+
+            EditorGUILayout.EndVertical();
+        }
+
+        /// <summary>Draw image gen settings inline (called by AIChatTab in Image Gen mode).</summary>
+        public new void DrawImageGenSettings()
+        {
+            EditorGUILayout.BeginVertical(EditorStyles.helpBox);
+
+            EditorGUILayout.BeginHorizontal();
+
+            // Model selection
+            EditorGUILayout.LabelField("Model:", GUILayout.Width(45));
+            int newModel = EditorGUILayout.Popup(_modelIndex, ModelLabels, GUILayout.Width(160));
+            if (newModel != _modelIndex)
+            {
+                _modelIndex = newModel;
+                EditorPrefs.SetInt(PrefKeyModel, _modelIndex);
+                EditorPrefs.SetString("UnityAgent_GeminiModel", ModelIds[_modelIndex]);
+            }
+
+            GUILayout.Space(8);
+
+            // API Key (compact)
+            EditorGUILayout.LabelField("Key:", GUILayout.Width(28));
+            bool hasKey = !string.IsNullOrEmpty(_geminiApiKey);
+            if (hasKey)
+            {
+                var oldColor = GUI.color;
+                GUI.color = ShaderInspectorStyles.GreenStatus;
+                EditorGUILayout.LabelField("Set", EditorStyles.miniLabel, GUILayout.Width(20));
+                GUI.color = oldColor;
+            }
+            else
+            {
+                var oldColor = GUI.color;
+                GUI.color = ShaderInspectorStyles.RedStatus;
+                EditorGUILayout.LabelField("None", EditorStyles.miniLabel, GUILayout.Width(30));
+                GUI.color = oldColor;
+            }
+
+            EditorGUILayout.EndHorizontal();
+
+            // Reference image
+            EditorGUILayout.BeginHorizontal();
+            EditorGUILayout.LabelField("Ref Image:", GUILayout.Width(65));
+            _referenceImage = (Texture2D)EditorGUILayout.ObjectField(
+                _referenceImage, typeof(Texture2D), false, GUILayout.Height(18));
+            if (_referenceImage != null)
+            {
+                if (GUILayout.Button("X", GUILayout.Width(20), GUILayout.Height(18)))
+                {
+                    _referenceImage = null;
+                }
+            }
+            EditorGUILayout.EndHorizontal();
+
+            // Small preview
+            if (_referenceImage != null)
+            {
+                var previewRect = GUILayoutUtility.GetRect(60, 60, GUILayout.ExpandWidth(false));
+                previewRect.x += 70;
+                previewRect.width = 60;
+                EditorGUI.DrawPreviewTexture(previewRect, _referenceImage, null, ScaleMode.ScaleToFit);
             }
 
             EditorGUILayout.EndVertical();

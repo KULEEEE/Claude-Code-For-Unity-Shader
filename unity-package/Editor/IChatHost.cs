@@ -13,5 +13,6 @@ namespace UnityAgent.Editor
         string GeminiApiKey => null;
         string GeminiModel => null;
         UnityEngine.Texture2D ReferenceImage => null;
+        void DrawImageGenSettings() {}
     }
 }
