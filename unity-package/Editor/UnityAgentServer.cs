@@ -203,11 +203,88 @@ namespace UnityAgent.Editor
                 var startInfo = new ProcessStartInfo();
 
                 #if UNITY_EDITOR_WIN
-                startInfo.FileName = "cmd";
-                startInfo.Arguments = "/c npx -y unity-agent-tools";
+                // Find node.exe and npx absolutely — never rely on PATH
+                string nodeDir = FindNodeDirectory();
+                if (nodeDir == null)
+                {
+                    Debug.LogError(
+                        "[UnityAgent] Node.js not found. Install Node.js 18+ from https://nodejs.org\n" +
+                        "Or set EditorPrefs key 'UnityAgent_NodeDir' to your Node.js install folder.");
+                    return;
+                }
+
+                string nodeExe = Path.Combine(nodeDir, "node.exe");
+                string npxScript = FindNpxScript(nodeDir);
+
+                if (npxScript != null)
+                {
+                    // Best: run node.exe with npx-cli.js directly (no shell, no PATH needed)
+                    startInfo.FileName = nodeExe;
+                    startInfo.Arguments = $"\"{npxScript}\" -y unity-agent-tools";
+                }
+                else
+                {
+                    // Fallback: use node to invoke npx via npm's internal require
+                    startInfo.FileName = nodeExe;
+                    startInfo.Arguments = "-e \"const p=require('child_process').spawn(" +
+                        "process.execPath,[require.resolve('npm/bin/npx-cli.js'),'-y','unity-agent-tools']," +
+                        "{stdio:'inherit'});p.on('exit',c=>process.exit(c))\"";
+                }
+
+                // Inject node dir into child PATH so npm/npx internals can find node
+                string existingPath = Environment.GetEnvironmentVariable("PATH") ?? "";
+                string machinePath = Environment.GetEnvironmentVariable("PATH",
+                    EnvironmentVariableTarget.Machine) ?? "";
+                string userPath = Environment.GetEnvironmentVariable("PATH",
+                    EnvironmentVariableTarget.User) ?? "";
+                // Merge all sources, prepend node dir
+                var allPaths = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+                allPaths.Add(nodeDir);
+                foreach (var p in existingPath.Split(';'))
+                    if (!string.IsNullOrWhiteSpace(p)) allPaths.Add(p.Trim());
+                foreach (var p in machinePath.Split(';'))
+                    if (!string.IsNullOrWhiteSpace(p)) allPaths.Add(p.Trim());
+                foreach (var p in userPath.Split(';'))
+                    if (!string.IsNullOrWhiteSpace(p)) allPaths.Add(p.Trim());
+
+                startInfo.EnvironmentVariables["PATH"] = string.Join(";", allPaths);
+
+                Debug.Log($"[UnityAgent] Using node: {nodeExe}");
                 #else
-                startInfo.FileName = "npx";
-                startInfo.Arguments = "-y unity-agent-tools";
+                // macOS / Linux: find node directory
+                string unixNodeDir = FindNodeDirectoryUnix();
+                if (unixNodeDir != null)
+                {
+                    string npxPath = Path.Combine(unixNodeDir, "npx");
+                    if (File.Exists(npxPath))
+                    {
+                        startInfo.FileName = npxPath;
+                        startInfo.Arguments = "-y unity-agent-tools";
+                    }
+                    else
+                    {
+                        startInfo.FileName = Path.Combine(unixNodeDir, "node");
+                        string unixNpxScript = FindNpxScript(unixNodeDir);
+                        startInfo.Arguments = unixNpxScript != null
+                            ? $"\"{unixNpxScript}\" -y unity-agent-tools"
+                            : "-e \"require('child_process').spawn(process.execPath," +
+                              "[require.resolve('npm/bin/npx-cli.js'),'-y','unity-agent-tools']," +
+                              "{stdio:'inherit'}).on('exit',c=>process.exit(c))\"";
+                    }
+
+                    // Prepend node dir to PATH
+                    string curPath = startInfo.EnvironmentVariables.ContainsKey("PATH")
+                        ? startInfo.EnvironmentVariables["PATH"]
+                        : Environment.GetEnvironmentVariable("PATH") ?? "";
+                    if (!curPath.Contains(unixNodeDir))
+                        startInfo.EnvironmentVariables["PATH"] = unixNodeDir + ":" + curPath;
+                }
+                else
+                {
+                    // Last resort: hope npx is in PATH
+                    startInfo.FileName = "npx";
+                    startInfo.Arguments = "-y unity-agent-tools";
+                }
                 #endif
 
                 startInfo.UseShellExecute = false;
@@ -239,10 +316,258 @@ namespace UnityAgent.Editor
             catch (Exception ex)
             {
                 Debug.LogWarning($"[UnityAgent] Failed to start MCP server: {ex.Message}. " +
-                    "Ensure Node.js 18+ is installed and npx is in PATH.");
+                    "Ensure Node.js 18+ is installed. " +
+                    "You can set EditorPrefs 'UnityAgent_NodeDir' to your Node.js folder.");
                 _mcpRunning = false;
             }
         }
+
+        #region Node.js Discovery
+
+        /// <summary>
+        /// Find Node.js installation directory on Windows.
+        /// Searches: EditorPrefs → common paths → NVM → Volta → fnm → registry → system PATH.
+        /// </summary>
+        private static string FindNodeDirectory()
+        {
+            // 1. User-configured override
+            string custom = EditorPrefs.GetString("UnityAgent_NodeDir", "");
+            if (!string.IsNullOrEmpty(custom) && File.Exists(Path.Combine(custom, "node.exe")))
+                return custom;
+
+            // 2. Common install locations
+            string[] commonPaths =
+            {
+                @"C:\Program Files\nodejs",
+                @"C:\Program Files (x86)\nodejs",
+                Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.ProgramFiles), "nodejs"),
+            };
+            foreach (var dir in commonPaths)
+                if (File.Exists(Path.Combine(dir, "node.exe")))
+                    return dir;
+
+            // 3. NVM for Windows: %APPDATA%\nvm\<version>\node.exe
+            string nvmDir = Path.Combine(
+                Environment.GetFolderPath(Environment.SpecialFolder.ApplicationData), "nvm");
+            if (Directory.Exists(nvmDir))
+            {
+                // Also check NVM symlink location
+                string nvmSymlink = Environment.GetEnvironmentVariable("NVM_SYMLINK");
+                if (!string.IsNullOrEmpty(nvmSymlink) && File.Exists(Path.Combine(nvmSymlink, "node.exe")))
+                    return nvmSymlink;
+
+                // Find latest version folder
+                string latestVersion = FindLatestVersionDir(nvmDir);
+                if (latestVersion != null && File.Exists(Path.Combine(latestVersion, "node.exe")))
+                    return latestVersion;
+            }
+
+            // 4. Volta: %LOCALAPPDATA%\Volta\tools\image\node\<version>\
+            string voltaNode = Path.Combine(
+                Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData),
+                "Volta", "tools", "image", "node");
+            if (Directory.Exists(voltaNode))
+            {
+                string latest = FindLatestVersionDir(voltaNode);
+                if (latest != null && File.Exists(Path.Combine(latest, "node.exe")))
+                    return latest;
+            }
+
+            // 5. fnm: %LOCALAPPDATA%\fnm_multishells\<id>\ or %APPDATA%\fnm\node-versions\<ver>\installation
+            string fnmDir = Path.Combine(
+                Environment.GetFolderPath(Environment.SpecialFolder.ApplicationData),
+                "fnm", "node-versions");
+            if (Directory.Exists(fnmDir))
+            {
+                string latest = FindLatestVersionDir(fnmDir);
+                if (latest != null)
+                {
+                    string installDir = Path.Combine(latest, "installation");
+                    if (File.Exists(Path.Combine(installDir, "node.exe")))
+                        return installDir;
+                }
+            }
+
+            // 6. Windows Registry
+            try
+            {
+                using (var key = Microsoft.Win32.Registry.LocalMachine.OpenSubKey(@"SOFTWARE\Node.js"))
+                {
+                    if (key != null)
+                    {
+                        string installPath = key.GetValue("InstallPath") as string;
+                        if (!string.IsNullOrEmpty(installPath) &&
+                            File.Exists(Path.Combine(installPath, "node.exe")))
+                            return installPath;
+                    }
+                }
+            }
+            catch { }
+
+            // 7. Search system + user PATH from registry (not from Unity process!)
+            string foundInPath = FindExecutableInRegistryPath("node.exe");
+            if (foundInPath != null)
+                return Path.GetDirectoryName(foundInPath);
+
+            // 8. Last resort: current process PATH
+            string envPath = Environment.GetEnvironmentVariable("PATH") ?? "";
+            foreach (var dir in envPath.Split(';'))
+            {
+                if (string.IsNullOrWhiteSpace(dir)) continue;
+                string candidate = Path.Combine(dir.Trim(), "node.exe");
+                if (File.Exists(candidate))
+                    return dir.Trim();
+            }
+
+            return null;
+        }
+
+        /// <summary>
+        /// Find Node.js installation directory on macOS/Linux.
+        /// </summary>
+        private static string FindNodeDirectoryUnix()
+        {
+            string[] commonPaths =
+            {
+                "/usr/local/bin",
+                "/usr/bin",
+                "/opt/homebrew/bin",
+            };
+            foreach (var dir in commonPaths)
+                if (File.Exists(Path.Combine(dir, "node")))
+                    return dir;
+
+            // NVM
+            string home = Environment.GetFolderPath(Environment.SpecialFolder.UserProfile);
+            string nvmVersions = Path.Combine(home, ".nvm", "versions", "node");
+            if (Directory.Exists(nvmVersions))
+            {
+                string latest = FindLatestVersionDir(nvmVersions);
+                if (latest != null)
+                {
+                    string binDir = Path.Combine(latest, "bin");
+                    if (File.Exists(Path.Combine(binDir, "node")))
+                        return binDir;
+                }
+            }
+
+            // Volta
+            string voltaBin = Path.Combine(home, ".volta", "bin");
+            if (File.Exists(Path.Combine(voltaBin, "node")))
+                return voltaBin;
+
+            // fnm
+            string fnmBase = Path.Combine(home, ".local", "share", "fnm", "node-versions");
+            if (Directory.Exists(fnmBase))
+            {
+                string latest = FindLatestVersionDir(fnmBase);
+                if (latest != null)
+                {
+                    string binDir = Path.Combine(latest, "installation", "bin");
+                    if (File.Exists(Path.Combine(binDir, "node")))
+                        return binDir;
+                }
+            }
+
+            // PATH
+            string envPath = Environment.GetEnvironmentVariable("PATH") ?? "";
+            foreach (var dir in envPath.Split(':'))
+            {
+                if (string.IsNullOrWhiteSpace(dir)) continue;
+                if (File.Exists(Path.Combine(dir.Trim(), "node")))
+                    return dir.Trim();
+            }
+
+            return null;
+        }
+
+        /// <summary>
+        /// Find npx-cli.js script relative to node directory.
+        /// </summary>
+        private static string FindNpxScript(string nodeDir)
+        {
+            string[] candidates =
+            {
+                Path.Combine(nodeDir, "node_modules", "npm", "bin", "npx-cli.js"),
+                Path.Combine(nodeDir, "node_modules", "npm", "bin", "npx-cli.cjs"),
+                // npm 10+
+                Path.Combine(nodeDir, "node_modules", "npm", "bin", "npx-cli.mjs"),
+                // Older npm
+                Path.Combine(nodeDir, "node_modules", "npm", "bin", "npx"),
+                // lib folder variant
+                Path.Combine(nodeDir, "lib", "node_modules", "npm", "bin", "npx-cli.js"),
+                Path.Combine(nodeDir, "lib", "node_modules", "npm", "bin", "npx-cli.cjs"),
+            };
+
+            foreach (var path in candidates)
+                if (File.Exists(path))
+                    return path;
+
+            return null;
+        }
+
+        /// <summary>
+        /// Search the system + user PATH from Windows registry for an executable.
+        /// This bypasses Unity's process PATH which may be stale.
+        /// </summary>
+        private static string FindExecutableInRegistryPath(string exeName)
+        {
+            try
+            {
+                string machinePath = Environment.GetEnvironmentVariable("PATH",
+                    EnvironmentVariableTarget.Machine) ?? "";
+                string userPath = Environment.GetEnvironmentVariable("PATH",
+                    EnvironmentVariableTarget.User) ?? "";
+                string combined = machinePath + ";" + userPath;
+
+                foreach (var dir in combined.Split(';'))
+                {
+                    if (string.IsNullOrWhiteSpace(dir)) continue;
+                    string candidate = Path.Combine(dir.Trim(), exeName);
+                    if (File.Exists(candidate))
+                        return candidate;
+                }
+            }
+            catch { }
+            return null;
+        }
+
+        /// <summary>
+        /// Find the latest semver-like directory in a parent folder (e.g., "v20.11.0").
+        /// </summary>
+        private static string FindLatestVersionDir(string parentDir)
+        {
+            try
+            {
+                string[] dirs = Directory.GetDirectories(parentDir);
+                if (dirs.Length == 0) return null;
+
+                string best = null;
+                Version bestVersion = null;
+
+                foreach (var dir in dirs)
+                {
+                    string name = Path.GetFileName(dir);
+                    // Strip 'v' prefix if present
+                    string versionStr = name.StartsWith("v", StringComparison.OrdinalIgnoreCase)
+                        ? name.Substring(1) : name;
+
+                    if (Version.TryParse(versionStr, out Version ver))
+                    {
+                        if (bestVersion == null || ver > bestVersion)
+                        {
+                            bestVersion = ver;
+                            best = dir;
+                        }
+                    }
+                }
+
+                return best;
+            }
+            catch { return null; }
+        }
+
+        #endregion
 
         public static void StopMCPServer()
         {

@@ -1,6 +1,6 @@
 {
   "name": "com.unity-agent",
-  "version": "0.9.0",
+  "version": "0.10.0",
   "displayName": "Unity Agent",
   "description": "AI-powered Unity Editor plugin with shader analysis and error auto-fix. Connects to Claude Code via MCP.",
   "unity": "2021.3",
