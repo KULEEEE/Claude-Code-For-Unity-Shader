@@ -203,7 +203,7 @@ namespace UnityAgent.Editor
                 var startInfo = new ProcessStartInfo();
 
                 #if UNITY_EDITOR_WIN
-                // Find node.exe and npx absolutely — never rely on PATH
+                // Find node.exe absolutely — never rely on Unity's PATH
                 string nodeDir = FindNodeDirectory();
                 if (nodeDir == null)
                 {
@@ -213,41 +213,44 @@ namespace UnityAgent.Editor
                     return;
                 }
 
+                // Create a temp .bat launcher that sets PATH before running npx.
+                // This is the only fully reliable way to propagate PATH to ALL
+                // child/grandchild processes on Windows (cmd, node, npm, npx shims).
                 string nodeExe = Path.Combine(nodeDir, "node.exe");
-                string npxScript = FindNpxScript(nodeDir);
+                string launcherPath = Path.Combine(Path.GetTempPath(), "unity-agent-mcp-launcher.bat");
 
-                if (npxScript != null)
-                {
-                    // Best: run node.exe with npx-cli.js directly (no shell, no PATH needed)
-                    startInfo.FileName = nodeExe;
-                    startInfo.Arguments = $"\"{npxScript}\" -y unity-agent-tools";
-                }
-                else
-                {
-                    // Fallback: use node to invoke npx via npm's internal require
-                    startInfo.FileName = nodeExe;
-                    startInfo.Arguments = "-e \"const p=require('child_process').spawn(" +
-                        "process.execPath,[require.resolve('npm/bin/npx-cli.js'),'-y','unity-agent-tools']," +
-                        "{stdio:'inherit'});p.on('exit',c=>process.exit(c))\"";
-                }
-
-                // Inject node dir into child PATH so npm/npx internals can find node
-                string existingPath = Environment.GetEnvironmentVariable("PATH") ?? "";
+                // Build a complete PATH from all sources
+                var allPaths = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+                allPaths.Add(nodeDir);
                 string machinePath = Environment.GetEnvironmentVariable("PATH",
                     EnvironmentVariableTarget.Machine) ?? "";
                 string userPath = Environment.GetEnvironmentVariable("PATH",
                     EnvironmentVariableTarget.User) ?? "";
-                // Merge all sources, prepend node dir
-                var allPaths = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
-                allPaths.Add(nodeDir);
-                foreach (var p in existingPath.Split(';'))
-                    if (!string.IsNullOrWhiteSpace(p)) allPaths.Add(p.Trim());
+                string processPath = Environment.GetEnvironmentVariable("PATH") ?? "";
                 foreach (var p in machinePath.Split(';'))
                     if (!string.IsNullOrWhiteSpace(p)) allPaths.Add(p.Trim());
                 foreach (var p in userPath.Split(';'))
                     if (!string.IsNullOrWhiteSpace(p)) allPaths.Add(p.Trim());
+                foreach (var p in processPath.Split(';'))
+                    if (!string.IsNullOrWhiteSpace(p)) allPaths.Add(p.Trim());
+                string fullPath = string.Join(";", allPaths);
 
-                startInfo.EnvironmentVariables["PATH"] = string.Join(";", allPaths);
+                // Try npx-cli.js first, fall back to npx.cmd
+                string npxScript = FindNpxScript(nodeDir);
+                string npxCmd;
+                if (npxScript != null)
+                    npxCmd = $"\"{nodeExe}\" \"{npxScript}\" -y unity-agent-tools";
+                else
+                    npxCmd = $"\"{Path.Combine(nodeDir, "npx.cmd")}\" -y unity-agent-tools";
+
+                string batContent =
+                    "@echo off\r\n" +
+                    $"set \"PATH={fullPath}\"\r\n" +
+                    $"{npxCmd}\r\n";
+                File.WriteAllText(launcherPath, batContent, Encoding.Default);
+
+                startInfo.FileName = "cmd";
+                startInfo.Arguments = $"/c \"{launcherPath}\"";
 
                 Debug.Log($"[UnityAgent] Using node: {nodeExe}");
                 #else
@@ -255,33 +258,31 @@ namespace UnityAgent.Editor
                 string unixNodeDir = FindNodeDirectoryUnix();
                 if (unixNodeDir != null)
                 {
+                    // Create a launcher shell script for reliable PATH propagation
+                    string unixLauncher = Path.Combine(Path.GetTempPath(), "unity-agent-mcp-launcher.sh");
                     string npxPath = Path.Combine(unixNodeDir, "npx");
-                    if (File.Exists(npxPath))
-                    {
-                        startInfo.FileName = npxPath;
-                        startInfo.Arguments = "-y unity-agent-tools";
-                    }
-                    else
-                    {
-                        startInfo.FileName = Path.Combine(unixNodeDir, "node");
-                        string unixNpxScript = FindNpxScript(unixNodeDir);
-                        startInfo.Arguments = unixNpxScript != null
-                            ? $"\"{unixNpxScript}\" -y unity-agent-tools"
-                            : "-e \"require('child_process').spawn(process.execPath," +
-                              "[require.resolve('npm/bin/npx-cli.js'),'-y','unity-agent-tools']," +
-                              "{stdio:'inherit'}).on('exit',c=>process.exit(c))\"";
-                    }
+                    string unixNpxScript = FindNpxScript(unixNodeDir);
 
-                    // Prepend node dir to PATH
-                    string curPath = startInfo.EnvironmentVariables.ContainsKey("PATH")
-                        ? startInfo.EnvironmentVariables["PATH"]
-                        : Environment.GetEnvironmentVariable("PATH") ?? "";
-                    if (!curPath.Contains(unixNodeDir))
-                        startInfo.EnvironmentVariables["PATH"] = unixNodeDir + ":" + curPath;
+                    string shellCmd;
+                    if (File.Exists(npxPath))
+                        shellCmd = $"\"{npxPath}\" -y unity-agent-tools";
+                    else if (unixNpxScript != null)
+                        shellCmd = $"\"{Path.Combine(unixNodeDir, "node")}\" \"{unixNpxScript}\" -y unity-agent-tools";
+                    else
+                        shellCmd = "npx -y unity-agent-tools";
+
+                    string curPath = Environment.GetEnvironmentVariable("PATH") ?? "";
+                    string shContent =
+                        "#!/bin/sh\n" +
+                        $"export PATH=\"{unixNodeDir}:{curPath}\"\n" +
+                        $"{shellCmd}\n";
+                    File.WriteAllText(unixLauncher, shContent);
+
+                    startInfo.FileName = "/bin/sh";
+                    startInfo.Arguments = $"\"{unixLauncher}\"";
                 }
                 else
                 {
-                    // Last resort: hope npx is in PATH
                     startInfo.FileName = "npx";
                     startInfo.Arguments = "-y unity-agent-tools";
                 }
