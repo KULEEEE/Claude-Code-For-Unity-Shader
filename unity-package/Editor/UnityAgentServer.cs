@@ -1119,6 +1119,49 @@ namespace UnityAgent.Editor
                             EditorUserBuildSettings.selectedBuildTargetGroup).ToString())
                     .ToString();
             });
+
+            // ── Frame Debugger handlers ──
+            _messageHandler.RegisterHandler("framedebug/capture", paramsJson =>
+            {
+                int maxEvents = JsonHelper.GetInt(paramsJson, "maxEvents", 0);
+                bool includeShaders = JsonHelper.GetBool(paramsJson, "includeShaders", false);
+                return FrameDebugBridge.Capture(maxEvents, includeShaders);
+            });
+
+            _messageHandler.RegisterHandler("framedebug/disable", _ =>
+            {
+                return FrameDebugBridge.Disable();
+            });
+
+            _messageHandler.RegisterHandler("framedebug/status", _ =>
+            {
+                return FrameDebugBridge.Status();
+            });
+
+            _messageHandler.RegisterHandler("framedebug/event", paramsJson =>
+            {
+                int eventIndex = JsonHelper.GetInt(paramsJson, "eventIndex", -1);
+                if (eventIndex < 0)
+                    return "{\"error\":\"missing-eventIndex\"}";
+                return FrameDebugBridge.GetEventDetail(eventIndex);
+            });
+
+            _messageHandler.RegisterHandler("framedebug/shader", paramsJson =>
+            {
+                int eventIndex = JsonHelper.GetInt(paramsJson, "eventIndex", -1);
+                if (eventIndex < 0)
+                    return "{\"error\":\"missing-eventIndex\"}";
+                return FrameDebugBridge.GetEventShader(eventIndex);
+            });
+
+            _messageHandler.RegisterHandler("framedebug/rt", paramsJson =>
+            {
+                int eventIndex = JsonHelper.GetInt(paramsJson, "eventIndex", -1);
+                int maxWidth = JsonHelper.GetInt(paramsJson, "maxWidth", 512);
+                if (eventIndex < 0)
+                    return "{\"error\":\"missing-eventIndex\"}";
+                return FrameDebugBridge.GetRenderTargetSnapshot(eventIndex, maxWidth);
+            });
         }
 
         #endregion

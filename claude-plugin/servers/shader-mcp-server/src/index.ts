@@ -27,6 +27,11 @@ import { registerListProjectFilesTool } from "./tools/list-project-files.js";
 // Image Generation Tools
 import { registerGenerateImageTool, geminiConfig } from "./tools/generate-image.js";
 
+// Frame Debugger Tools
+import { registerFrameDebugCaptureTool } from "./tools/framedebug-capture.js";
+import { registerFrameDebugEventTool } from "./tools/framedebug-event.js";
+import { registerFrameDebugRtTool } from "./tools/framedebug-rt.js";
+
 // Resources
 import { registerPipelineInfoResource } from "./resources/pipeline-info.js";
 import { registerShaderIncludesResource } from "./resources/shader-includes.js";
@@ -63,6 +68,11 @@ async function main(): Promise<void> {
 
   // ── Image Generation Tools (Nano Banana) ──
   registerGenerateImageTool(server, bridge);
+
+  // ── Frame Debugger Tools ──
+  registerFrameDebugCaptureTool(server, bridge);
+  registerFrameDebugEventTool(server, bridge);
+  registerFrameDebugRtTool(server, bridge);
 
   // ── Resources ──
   registerPipelineInfoResource(server, bridge);
