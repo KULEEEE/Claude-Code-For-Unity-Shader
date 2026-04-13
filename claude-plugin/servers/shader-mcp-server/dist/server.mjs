@@ -32560,6 +32560,105 @@ function registerFrameDebugRtTool(server, bridge) {
   });
 }
 
+// build/tools/framedebug-summary.js
+var SUMMARY_TIMEOUT = 45e3;
+function registerFrameDebugSummaryTool(server, bridge) {
+  server.tool("framedebug_summary", "Get an aggregate view of the current frame WITHOUT enumerating every event. Returns per-shader stats, event-type histogram, RT transition ranges, batch-break cause histogram, and top-N hotspots ranked by vertex\xD7instance cost. Enables the Frame Debugger automatically if it's not running. Use this first to answer 'what's expensive in this frame?' before drilling in with framedebug_search / framedebug_event_detail.", {
+    topHotspots: external_exports.number().int().min(0).max(64).default(8).describe("How many top-cost events to list as hotspots (0 = default 8)."),
+    includeShaders: external_exports.boolean().default(true).describe("Include per-shader aggregation and RT transitions. Forces a deep sweep through GetFrameEventData; disable for very large frames (>1024 events) if summary feels slow.")
+  }, async ({ topHotspots, includeShaders }) => {
+    try {
+      const result = await bridge.request("framedebug/summary", { topHotspots, includeShaders }, SUMMARY_TIMEOUT);
+      return {
+        content: [
+          {
+            type: "text",
+            text: JSON.stringify(result ?? { error: "No response from Unity" }, null, 2)
+          }
+        ]
+      };
+    } catch (err) {
+      return {
+        content: [
+          {
+            type: "text",
+            text: `Error fetching summary: ${err instanceof Error ? err.message : String(err)}`
+          }
+        ],
+        isError: true
+      };
+    }
+  });
+}
+
+// build/tools/framedebug-search.js
+var SEARCH_TIMEOUT = 3e4;
+function registerFrameDebugSearchTool(server, bridge) {
+  server.tool("framedebug_search", "Search frame events by predicate and return matching indices + light summaries. Combine filters (all AND'd): shader name substring, pass name substring, required shader keyword, event type substring (e.g. 'Draw'), min vertex/instance count, or only-batch-breaks. Use after framedebug_summary spots something interesting, then feed matching indices into framedebug_event_detail / framedebug_compare / framedebug_rt_snapshot.", {
+    shaderNameContains: external_exports.string().optional().describe("Case-insensitive substring match on shaderName (e.g. 'Universal', 'MyProject/')."),
+    passNameContains: external_exports.string().optional().describe("Case-insensitive substring match on passName (e.g. 'ShadowCaster', 'Forward')."),
+    keyword: external_exports.string().optional().describe("Only match events whose shader keyword array contains this substring (e.g. '_FOG_LINEAR', '_MAIN_LIGHT_SHADOWS')."),
+    eventType: external_exports.string().optional().describe("Substring match on FrameEventType (e.g. 'Draw', 'SetRenderTarget', 'ResolveRT', 'Clear')."),
+    minVertexCount: external_exports.number().int().min(0).default(0).describe("Minimum vertex count to include (useful to find heavy draws)."),
+    minInstanceCount: external_exports.number().int().min(0).default(0).describe("Minimum instance count (>0 finds instanced draws; >1 filters out non-instanced)."),
+    batchBreaks: external_exports.boolean().default(false).describe("When true, only return events that Unity marked as a batch break."),
+    limit: external_exports.number().int().min(1).max(512).default(64).describe("Max matches to return. 512 is the hard ceiling.")
+  }, async (filters) => {
+    try {
+      const result = await bridge.request("framedebug/search", filters, SEARCH_TIMEOUT);
+      return {
+        content: [
+          {
+            type: "text",
+            text: JSON.stringify(result ?? { error: "No response from Unity" }, null, 2)
+          }
+        ]
+      };
+    } catch (err) {
+      return {
+        content: [
+          {
+            type: "text",
+            text: `Error searching events: ${err instanceof Error ? err.message : String(err)}`
+          }
+        ],
+        isError: true
+      };
+    }
+  });
+}
+
+// build/tools/framedebug-compare.js
+var COMPARE_TIMEOUT = 15e3;
+function registerFrameDebugCompareTool(server, bridge) {
+  server.tool("framedebug_compare", "Diff two Frame Debugger events. Returns shader/pass change flags, keyword set diff (added/removed), render-state diff (raster/blend/depth/stencil fields that differ), RT dimension change, geometry deltas, and batch-break transition. Use this to answer 'why did this drawcall batch-break from the previous one' or 'what changed between these two passes'. Requires a prior framedebug_capture / framedebug_summary.", {
+    indexA: external_exports.number().int().min(0).describe("Earlier (baseline) event index."),
+    indexB: external_exports.number().int().min(0).describe("Later (comparison) event index.")
+  }, async ({ indexA, indexB }) => {
+    try {
+      const result = await bridge.request("framedebug/compare", { indexA, indexB }, COMPARE_TIMEOUT);
+      return {
+        content: [
+          {
+            type: "text",
+            text: JSON.stringify(result ?? { error: "No response from Unity" }, null, 2)
+          }
+        ]
+      };
+    } catch (err) {
+      return {
+        content: [
+          {
+            type: "text",
+            text: `Error comparing events: ${err instanceof Error ? err.message : String(err)}`
+          }
+        ],
+        isError: true
+      };
+    }
+  });
+}
+
 // build/resources/pipeline-info.js
 function registerPipelineInfoResource(server, bridge) {
   server.resource("pipeline-info", "unity://pipeline/info", {
@@ -32709,6 +32808,9 @@ async function main() {
   registerFrameDebugCaptureTool(server, bridge);
   registerFrameDebugEventTool(server, bridge);
   registerFrameDebugRtTool(server, bridge);
+  registerFrameDebugSummaryTool(server, bridge);
+  registerFrameDebugSearchTool(server, bridge);
+  registerFrameDebugCompareTool(server, bridge);
   registerPipelineInfoResource(server, bridge);
   registerShaderIncludesResource(server, bridge);
   registerShaderKeywordsResource(server, bridge);

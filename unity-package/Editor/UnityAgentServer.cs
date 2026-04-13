@@ -1162,6 +1162,29 @@ namespace UnityAgent.Editor
                     return "{\"error\":\"missing-eventIndex\"}";
                 return FrameDebugBridge.GetRenderTargetSnapshot(eventIndex, maxWidth);
             });
+
+            // ── Tiki-taka aggregates ──
+            _messageHandler.RegisterHandler("framedebug/summary", paramsJson =>
+            {
+                int topHotspots = JsonHelper.GetInt(paramsJson, "topHotspots", 8);
+                bool includeShaders = JsonHelper.GetBool(paramsJson, "includeShaders", true);
+                return FrameDebugBridge.Summary(topHotspots, includeShaders);
+            });
+
+            _messageHandler.RegisterHandler("framedebug/search", paramsJson =>
+            {
+                // Pass the full params blob so FrameDebugBridge can unpack its own filters.
+                return FrameDebugBridge.Search(paramsJson ?? "{}");
+            });
+
+            _messageHandler.RegisterHandler("framedebug/compare", paramsJson =>
+            {
+                int indexA = JsonHelper.GetInt(paramsJson, "indexA", -1);
+                int indexB = JsonHelper.GetInt(paramsJson, "indexB", -1);
+                if (indexA < 0 || indexB < 0)
+                    return "{\"error\":\"missing-index\",\"detail\":\"indexA and indexB are both required\"}";
+                return FrameDebugBridge.Compare(indexA, indexB);
+            });
         }
 
         #endregion

@@ -31,6 +31,9 @@ import { registerGenerateImageTool, geminiConfig } from "./tools/generate-image.
 import { registerFrameDebugCaptureTool } from "./tools/framedebug-capture.js";
 import { registerFrameDebugEventTool } from "./tools/framedebug-event.js";
 import { registerFrameDebugRtTool } from "./tools/framedebug-rt.js";
+import { registerFrameDebugSummaryTool } from "./tools/framedebug-summary.js";
+import { registerFrameDebugSearchTool } from "./tools/framedebug-search.js";
+import { registerFrameDebugCompareTool } from "./tools/framedebug-compare.js";
 
 // Resources
 import { registerPipelineInfoResource } from "./resources/pipeline-info.js";
@@ -73,6 +76,9 @@ async function main(): Promise<void> {
   registerFrameDebugCaptureTool(server, bridge);
   registerFrameDebugEventTool(server, bridge);
   registerFrameDebugRtTool(server, bridge);
+  registerFrameDebugSummaryTool(server, bridge);
+  registerFrameDebugSearchTool(server, bridge);
+  registerFrameDebugCompareTool(server, bridge);
 
   // ── Resources ──
   registerPipelineInfoResource(server, bridge);
