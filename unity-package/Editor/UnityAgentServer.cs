@@ -51,13 +51,10 @@ namespace UnityAgent.Editor
             AssemblyReloadEvents.beforeAssemblyReload -= OnBeforeAssemblyReload;
             AssemblyReloadEvents.beforeAssemblyReload += OnBeforeAssemblyReload;
 
-            // Auto-restart after domain reload
+            // Always auto-start when Unity Editor loads
             EditorApplication.delayCall += () =>
             {
-                if (SessionState.GetBool("UnityAgent_WasRunning", false))
-                {
-                    StartServer();
-                }
+                EnsureRunning();
             };
         }
 
