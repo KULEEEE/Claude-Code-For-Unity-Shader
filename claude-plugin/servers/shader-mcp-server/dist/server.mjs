@@ -1,5 +1,3 @@
-#!/usr/bin/env node
-import { createRequire } from 'module'; const require = createRequire(import.meta.url);
 var __create = Object.create;
 var __defProp = Object.defineProperty;
 var __getOwnPropDesc = Object.getOwnPropertyDescriptor;
@@ -32382,6 +32380,184 @@ Prompt: "${prompt}"
   });
 }
 
+// build/tools/framedebug-capture.js
+var CAPTURE_TIMEOUT = 3e4;
+function registerFrameDebugCaptureTool(server, bridge) {
+  server.tool("framedebug_capture", "Enable Unity's Frame Debugger and capture the current frame. Returns a compact event overview (type, shader, draw counts) for the AI to scan \u2014 use framedebug_event_detail / framedebug_rt_snapshot to drill into specific events by index. Call framedebug_disable when done.", {
+    maxEvents: external_exports.number().int().min(0).default(0).describe("Maximum events to include in overview (0 = all)."),
+    includeShaders: external_exports.boolean().default(false).describe("Include shader/pass name in each overview entry (costs extra reflection calls per event).")
+  }, async ({ maxEvents, includeShaders }) => {
+    try {
+      const result = await bridge.request("framedebug/capture", { maxEvents, includeShaders }, CAPTURE_TIMEOUT);
+      return {
+        content: [
+          {
+            type: "text",
+            text: JSON.stringify(result ?? { error: "No response from Unity" }, null, 2)
+          }
+        ]
+      };
+    } catch (err) {
+      return {
+        content: [
+          {
+            type: "text",
+            text: `Error capturing frame: ${err instanceof Error ? err.message : String(err)}`
+          }
+        ],
+        isError: true
+      };
+    }
+  });
+  server.tool("framedebug_disable", "Disable Unity's Frame Debugger (releases resources, resumes normal rendering).", {}, async () => {
+    try {
+      const result = await bridge.request("framedebug/disable", {}, 1e4);
+      return {
+        content: [
+          { type: "text", text: JSON.stringify(result ?? {}, null, 2) }
+        ]
+      };
+    } catch (err) {
+      return {
+        content: [
+          {
+            type: "text",
+            text: `Error disabling frame debugger: ${err instanceof Error ? err.message : String(err)}`
+          }
+        ],
+        isError: true
+      };
+    }
+  });
+  server.tool("framedebug_status", "Check the current Frame Debugger state without triggering a capture \u2014 returns {available, enabled, eventCount, isPlaying, unityVersion}.", {}, async () => {
+    try {
+      const result = await bridge.request("framedebug/status", {}, 5e3);
+      return {
+        content: [
+          { type: "text", text: JSON.stringify(result ?? {}, null, 2) }
+        ]
+      };
+    } catch (err) {
+      return {
+        content: [
+          {
+            type: "text",
+            text: `Error getting status: ${err instanceof Error ? err.message : String(err)}`
+          }
+        ],
+        isError: true
+      };
+    }
+  });
+}
+
+// build/tools/framedebug-event.js
+var EVENT_TIMEOUT = 15e3;
+function registerFrameDebugEventTool(server, bridge) {
+  server.tool("framedebug_event_detail", "Get the full state for a single Frame Debugger event: shader, keywords, render target, geometry, blend/depth/stencil state, and shader property snapshot. Requires a prior framedebug_capture. Use the event's `index` from the capture overview.", {
+    eventIndex: external_exports.number().int().min(0).describe("Event index from the framedebug_capture overview (0-based).")
+  }, async ({ eventIndex }) => {
+    try {
+      const result = await bridge.request("framedebug/event", { eventIndex }, EVENT_TIMEOUT);
+      return {
+        content: [
+          {
+            type: "text",
+            text: JSON.stringify(result ?? { error: "No response from Unity" }, null, 2)
+          }
+        ]
+      };
+    } catch (err) {
+      return {
+        content: [
+          {
+            type: "text",
+            text: `Error fetching event detail: ${err instanceof Error ? err.message : String(err)}`
+          }
+        ],
+        isError: true
+      };
+    }
+  });
+  server.tool("framedebug_event_shader", "Get just the shader + keyword info for one Frame Debugger event (lighter than framedebug_event_detail). Useful when the AI wants to locate the asset or inspect variant keywords without pulling the full state dump.", {
+    eventIndex: external_exports.number().int().min(0).describe("Event index from the framedebug_capture overview.")
+  }, async ({ eventIndex }) => {
+    try {
+      const result = await bridge.request("framedebug/shader", { eventIndex }, EVENT_TIMEOUT);
+      return {
+        content: [
+          {
+            type: "text",
+            text: JSON.stringify(result ?? { error: "No response from Unity" }, null, 2)
+          }
+        ]
+      };
+    } catch (err) {
+      return {
+        content: [
+          {
+            type: "text",
+            text: `Error fetching event shader: ${err instanceof Error ? err.message : String(err)}`
+          }
+        ],
+        isError: true
+      };
+    }
+  });
+}
+
+// build/tools/framedebug-rt.js
+var RT_TIMEOUT = 3e4;
+function registerFrameDebugRtTool(server, bridge) {
+  server.tool("framedebug_rt_snapshot", "Capture the active render target after a specific Frame Debugger event as a PNG (base64). Use this when you want VISUAL confirmation of what the GPU drew up to that event \u2014 e.g. 'did the shadow pass actually write anything?'. Expensive; call only when necessary.", {
+    eventIndex: external_exports.number().int().min(0).describe("Event index to stop at (the RT is captured after this event completes)."),
+    maxWidth: external_exports.number().int().min(32).max(4096).default(512).describe("Max width in pixels for the returned PNG (height scales to preserve aspect). Default 512 keeps payload ~<300KB.")
+  }, async ({ eventIndex, maxWidth }) => {
+    try {
+      const result = await bridge.request("framedebug/rt", { eventIndex, maxWidth }, RT_TIMEOUT);
+      const r = result;
+      if (r?.data && r.format === "png-base64") {
+        return {
+          content: [
+            {
+              type: "text",
+              text: JSON.stringify({
+                eventIndex,
+                width: r.width,
+                height: r.height,
+                bytes: r.bytes
+              }, null, 2)
+            },
+            {
+              type: "image",
+              data: r.data,
+              mimeType: "image/png"
+            }
+          ]
+        };
+      }
+      return {
+        content: [
+          {
+            type: "text",
+            text: JSON.stringify(r ?? { error: "No response from Unity" }, null, 2)
+          }
+        ]
+      };
+    } catch (err) {
+      return {
+        content: [
+          {
+            type: "text",
+            text: `Error fetching RT snapshot: ${err instanceof Error ? err.message : String(err)}`
+          }
+        ],
+        isError: true
+      };
+    }
+  });
+}
+
 // build/resources/pipeline-info.js
 function registerPipelineInfoResource(server, bridge) {
   server.resource("pipeline-info", "unity://pipeline/info", {
@@ -32528,6 +32704,9 @@ async function main() {
   registerWriteProjectFileTool(server, bridge);
   registerListProjectFilesTool(server, bridge);
   registerGenerateImageTool(server, bridge);
+  registerFrameDebugCaptureTool(server, bridge);
+  registerFrameDebugEventTool(server, bridge);
+  registerFrameDebugRtTool(server, bridge);
   registerPipelineInfoResource(server, bridge);
   registerShaderIncludesResource(server, bridge);
   registerShaderKeywordsResource(server, bridge);
