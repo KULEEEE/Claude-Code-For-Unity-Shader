@@ -791,5 +791,566 @@ namespace UnityAgent.Editor
         }
 
         #endregion
+
+        #region Tiki-taka Aggregates (Summary / Search / Compare)
+
+        /// <summary>
+        /// Bird's-eye aggregate of the current (or freshly captured) frame.
+        /// Does NOT enumerate every event — groups by shader / event type,
+        /// lists RT transitions and batch-break causes, plus top-N hotspots.
+        ///
+        /// Call without needing a prior capture: this will enable the Frame
+        /// Debugger itself if no events are available yet.
+        /// </summary>
+        public static string Summary(int topHotspots, bool includeShaders)
+        {
+            if (!IsAvailable(out string err)) return err;
+
+            try
+            {
+                if (GetCount() == 0)
+                    SetEnabledSafe(true);
+
+                int count = GetCount();
+                var events = GetFrameEventsArray();
+                if (events == null || count == 0)
+                {
+                    return JsonHelper.StartObject()
+                        .Key("eventCount").Value(0)
+                        .Key("warning").Value("Frame Debugger returned no events (scene may be idle or capture not ready)")
+                        .ToString();
+                }
+
+                int total = Math.Min(count, events.Length);
+
+                // Per-event-type counts + geometry totals.
+                var typeCounts = new Dictionary<string, int>(StringComparer.Ordinal);
+                long totalVerts = 0, totalIndices = 0, totalInstances = 0, totalDrawCalls = 0;
+
+                // Hotspot ranking — cost proxy = max(vertexCount, indexCount/3) * max(1,instanceCount).
+                var hotspotEntries = new List<HotspotEntry>(total);
+
+                for (int i = 0; i < total; i++)
+                {
+                    object fdEvent = events.GetValue(i);
+                    if (fdEvent == null) continue;
+                    var t = fdEvent.GetType();
+                    string typeStr = ReadEventType(fdEvent, t);
+                    int verts = ReadInt(fdEvent, t, "vertexCount", 0);
+                    int idx = ReadInt(fdEvent, t, "indexCount", 0);
+                    int inst = ReadInt(fdEvent, t, "instanceCount", 0);
+                    int draws = ReadInt(fdEvent, t, "drawCallCount", 0);
+
+                    if (!string.IsNullOrEmpty(typeStr))
+                    {
+                        typeCounts.TryGetValue(typeStr, out int c);
+                        typeCounts[typeStr] = c + 1;
+                    }
+                    totalVerts += verts;
+                    totalIndices += idx;
+                    totalInstances += Math.Max(0, inst);
+                    totalDrawCalls += Math.Max(0, draws);
+
+                    long cost = (long)Math.Max(verts, idx / 3) * Math.Max(1, inst);
+                    hotspotEntries.Add(new HotspotEntry {
+                        index = i, type = typeStr, vertexCount = verts,
+                        indexCount = idx, instanceCount = inst, cost = cost,
+                    });
+                }
+
+                // Per-shader aggregation + RT transitions + batch breaks.
+                // These need per-event GetFrameEventData — only iterate when caller opts in,
+                // OR when the event count is modest (cap to protect editor responsiveness).
+                var shaderStats = new Dictionary<string, ShaderStat>(StringComparer.Ordinal);
+                var rtTransitions = new List<RtRange>();
+                var batchCauses = new Dictionary<string, BatchCause>(StringComparer.Ordinal);
+
+                bool deepSweep = includeShaders || total <= 256;
+                int deepCap = 1024; // hard ceiling regardless of opt-in
+                int deepEnd = Math.Min(total, deepCap);
+                string currentRt = null;
+                int currentRtStart = 0;
+
+                if (deepSweep)
+                {
+                    for (int i = 0; i < deepEnd; i++)
+                    {
+                        object ed = TryGetEventData(i);
+                        if (ed == null) continue;
+                        var edT = ed.GetType();
+                        string shader = ReadString(ed, edT, "shaderName");
+                        string pass = ReadString(ed, edT, "passName");
+                        int rtW = ReadInt(ed, edT, "rtWidth", 0);
+                        int rtH = ReadInt(ed, edT, "rtHeight", 0);
+                        int rtCount = ReadInt(ed, edT, "rtCount", 0);
+                        string rtKey = $"{rtW}x{rtH} mrt={rtCount}";
+
+                        if (!string.IsNullOrEmpty(shader))
+                        {
+                            string key = shader + "|" + (pass ?? "");
+                            if (!shaderStats.TryGetValue(key, out var s))
+                            {
+                                s = new ShaderStat { shaderName = shader, passName = pass, firstIndex = i };
+                                shaderStats[key] = s;
+                            }
+                            s.events++;
+                            s.lastIndex = i;
+                            // Pull verts again from the fdEvent (cheap — already read)
+                            if (i < total)
+                            {
+                                var fe = events.GetValue(i);
+                                var fet = fe?.GetType();
+                                if (fet != null)
+                                {
+                                    s.totalVerts += ReadInt(fe, fet, "vertexCount", 0);
+                                    s.totalDrawCalls += Math.Max(0, ReadInt(fe, fet, "drawCallCount", 0));
+                                }
+                            }
+                        }
+
+                        // RT transition tracking
+                        if (currentRt == null) { currentRt = rtKey; currentRtStart = i; }
+                        else if (!string.Equals(currentRt, rtKey, StringComparison.Ordinal))
+                        {
+                            rtTransitions.Add(new RtRange { rt = currentRt, startIndex = currentRtStart, endIndex = i - 1 });
+                            currentRt = rtKey;
+                            currentRtStart = i;
+                        }
+
+                        // Batch break cause
+                        string cause = ReadString(ed, edT, "batchBreakCauseStr");
+                        if (string.IsNullOrEmpty(cause))
+                            cause = ReadString(ed, edT, "batchBreakCause");
+                        if (!string.IsNullOrEmpty(cause) && cause != "0")
+                        {
+                            if (!batchCauses.TryGetValue(cause, out var bc))
+                            {
+                                bc = new BatchCause { cause = cause, sampleIndex = i };
+                                batchCauses[cause] = bc;
+                            }
+                            bc.count++;
+                        }
+                    }
+                    if (currentRt != null)
+                        rtTransitions.Add(new RtRange { rt = currentRt, startIndex = currentRtStart, endIndex = deepEnd - 1 });
+                }
+
+                // Build JSON
+                var builder = JsonHelper.StartObject()
+                    .Key("eventCount").Value(total)
+                    .Key("isPlaying").Value(EditorApplication.isPlaying)
+                    .Key("deepSweep").Value(deepSweep)
+                    .Key("deepSweepLimit").Value(deepEnd);
+
+                builder.Key("totals").BeginObject()
+                    .Key("vertices").Value(totalVerts)
+                    .Key("indices").Value(totalIndices)
+                    .Key("instances").Value(totalInstances)
+                    .Key("drawCalls").Value(totalDrawCalls)
+                    .EndObject();
+
+                builder.Key("eventTypes").BeginArray();
+                foreach (var kv in typeCounts)
+                {
+                    builder.BeginObject()
+                        .Key("type").Value(kv.Key)
+                        .Key("count").Value(kv.Value)
+                        .EndObject();
+                }
+                builder.EndArray();
+
+                builder.Key("byShader").BeginArray();
+                // Sort shaders by totalVerts desc
+                var shaderList = new List<ShaderStat>(shaderStats.Values);
+                shaderList.Sort((a, b) => b.totalVerts.CompareTo(a.totalVerts));
+                int shaderCap = Math.Min(shaderList.Count, 64);
+                for (int i = 0; i < shaderCap; i++)
+                {
+                    var s = shaderList[i];
+                    builder.BeginObject()
+                        .Key("shader").Value(s.shaderName)
+                        .Key("pass").Value(s.passName ?? "")
+                        .Key("events").Value(s.events)
+                        .Key("totalVerts").Value(s.totalVerts)
+                        .Key("totalDrawCalls").Value(s.totalDrawCalls)
+                        .Key("firstIndex").Value(s.firstIndex)
+                        .Key("lastIndex").Value(s.lastIndex)
+                        .EndObject();
+                }
+                builder.EndArray();
+                if (shaderList.Count > shaderCap)
+                    builder.Key("shaderTruncated").Value(shaderList.Count - shaderCap);
+
+                builder.Key("rtTransitions").BeginArray();
+                int rtCap = Math.Min(rtTransitions.Count, 32);
+                for (int i = 0; i < rtCap; i++)
+                {
+                    var r = rtTransitions[i];
+                    builder.BeginObject()
+                        .Key("rt").Value(r.rt)
+                        .Key("startIndex").Value(r.startIndex)
+                        .Key("endIndex").Value(r.endIndex)
+                        .EndObject();
+                }
+                builder.EndArray();
+                if (rtTransitions.Count > rtCap)
+                    builder.Key("rtTransitionsTruncated").Value(rtTransitions.Count - rtCap);
+
+                builder.Key("batchBreaks").BeginArray();
+                var causeList = new List<BatchCause>(batchCauses.Values);
+                causeList.Sort((a, b) => b.count.CompareTo(a.count));
+                foreach (var bc in causeList)
+                {
+                    builder.BeginObject()
+                        .Key("cause").Value(bc.cause)
+                        .Key("count").Value(bc.count)
+                        .Key("sampleIndex").Value(bc.sampleIndex)
+                        .EndObject();
+                }
+                builder.EndArray();
+
+                // Hotspots
+                hotspotEntries.Sort((a, b) => b.cost.CompareTo(a.cost));
+                int hotN = topHotspots <= 0 ? 8 : Math.Min(topHotspots, 64);
+                hotN = Math.Min(hotN, hotspotEntries.Count);
+                builder.Key("hotspots").BeginArray();
+                for (int i = 0; i < hotN; i++)
+                {
+                    var h = hotspotEntries[i];
+                    if (h.cost <= 0) continue;
+                    builder.BeginObject()
+                        .Key("index").Value(h.index)
+                        .Key("type").Value(h.type ?? "")
+                        .Key("vertexCount").Value(h.vertexCount)
+                        .Key("indexCount").Value(h.indexCount)
+                        .Key("instanceCount").Value(h.instanceCount)
+                        .Key("cost").Value(h.cost)
+                        .EndObject();
+                }
+                builder.EndArray();
+
+                if (!string.IsNullOrEmpty(_lastReflectionError))
+                    builder.Key("warning").Value(_lastReflectionError);
+
+                return builder.ToString();
+            }
+            catch (Exception ex)
+            {
+                return BuildError("summary-failed", ex.Message);
+            }
+        }
+
+        /// <summary>
+        /// Filter frame events by a JSON-encoded predicate. Returns matching
+        /// event indices + light summaries. Keeps event-data reflection gated
+        /// so we don't pay for per-event EventData unless the filter needs it.
+        /// </summary>
+        public static string Search(string filtersJson)
+        {
+            if (!IsAvailable(out string err)) return err;
+
+            try
+            {
+                int count = GetCount();
+                if (count == 0)
+                    SetEnabledSafe(true);
+                count = GetCount();
+                if (count == 0)
+                    return BuildError("no-events", "Frame Debugger has no events — call framedebug/capture or ensure editor is playing");
+
+                var events = GetFrameEventsArray();
+                if (events == null)
+                    return BuildError("no-events", "GetFrameEvents returned null");
+
+                string shaderContains = JsonHelper.GetString(filtersJson, "shaderNameContains");
+                string passContains = JsonHelper.GetString(filtersJson, "passNameContains");
+                string keyword = JsonHelper.GetString(filtersJson, "keyword");
+                string eventTypeFilter = JsonHelper.GetString(filtersJson, "eventType");
+                int minVerts = JsonHelper.GetInt(filtersJson, "minVertexCount", 0);
+                int minInstances = JsonHelper.GetInt(filtersJson, "minInstanceCount", 0);
+                bool onlyBatchBreaks = JsonHelper.GetBool(filtersJson, "batchBreaks", false);
+                int limit = JsonHelper.GetInt(filtersJson, "limit", 64);
+                if (limit <= 0) limit = 64;
+                if (limit > 512) limit = 512;
+
+                bool needEventData = !string.IsNullOrEmpty(shaderContains)
+                    || !string.IsNullOrEmpty(passContains)
+                    || !string.IsNullOrEmpty(keyword)
+                    || onlyBatchBreaks;
+
+                var builder = JsonHelper.StartObject()
+                    .Key("eventCount").Value(count)
+                    .Key("filter").BeginObject()
+                        .Key("shaderNameContains").Value(shaderContains ?? "")
+                        .Key("passNameContains").Value(passContains ?? "")
+                        .Key("keyword").Value(keyword ?? "")
+                        .Key("eventType").Value(eventTypeFilter ?? "")
+                        .Key("minVertexCount").Value(minVerts)
+                        .Key("minInstanceCount").Value(minInstances)
+                        .Key("batchBreaks").Value(onlyBatchBreaks)
+                        .Key("limit").Value(limit)
+                    .EndObject();
+
+                builder.Key("matches").BeginArray();
+
+                int total = Math.Min(count, events.Length);
+                int matched = 0;
+                int scanned = 0;
+                StringComparison sc = StringComparison.OrdinalIgnoreCase;
+
+                for (int i = 0; i < total && matched < limit; i++)
+                {
+                    scanned++;
+                    object fdEvent = events.GetValue(i);
+                    if (fdEvent == null) continue;
+                    var t = fdEvent.GetType();
+
+                    string typeStr = ReadEventType(fdEvent, t);
+                    int verts = ReadInt(fdEvent, t, "vertexCount", 0);
+                    int inst = ReadInt(fdEvent, t, "instanceCount", 0);
+
+                    if (!string.IsNullOrEmpty(eventTypeFilter) &&
+                        (typeStr == null || typeStr.IndexOf(eventTypeFilter, sc) < 0))
+                        continue;
+                    if (verts < minVerts) continue;
+                    if (inst < minInstances) continue;
+
+                    string shader = null, pass = null, cause = null;
+                    string[] keywords = null;
+                    if (needEventData)
+                    {
+                        object ed = TryGetEventData(i);
+                        if (ed == null) continue;
+                        var edT = ed.GetType();
+                        shader = ReadString(ed, edT, "shaderName");
+                        pass = ReadString(ed, edT, "passName");
+                        keywords = ReadStringArray(ed, edT, "shaderKeywords");
+                        cause = ReadString(ed, edT, "batchBreakCauseStr");
+                        if (string.IsNullOrEmpty(cause))
+                            cause = ReadString(ed, edT, "batchBreakCause");
+
+                        if (!string.IsNullOrEmpty(shaderContains) &&
+                            (shader == null || shader.IndexOf(shaderContains, sc) < 0)) continue;
+                        if (!string.IsNullOrEmpty(passContains) &&
+                            (pass == null || pass.IndexOf(passContains, sc) < 0)) continue;
+                        if (!string.IsNullOrEmpty(keyword))
+                        {
+                            if (keywords == null) continue;
+                            bool found = false;
+                            foreach (var kw in keywords)
+                                if (!string.IsNullOrEmpty(kw) && kw.IndexOf(keyword, sc) >= 0) { found = true; break; }
+                            if (!found) continue;
+                        }
+                        if (onlyBatchBreaks && (string.IsNullOrEmpty(cause) || cause == "0")) continue;
+                    }
+
+                    matched++;
+                    builder.BeginObject()
+                        .Key("index").Value(i)
+                        .Key("type").Value(typeStr ?? "")
+                        .Key("vertexCount").Value(verts)
+                        .Key("instanceCount").Value(inst);
+                    if (shader != null) builder.Key("shader").Value(shader);
+                    if (pass != null) builder.Key("pass").Value(pass);
+                    if (!string.IsNullOrEmpty(cause) && cause != "0")
+                        builder.Key("batchBreakCause").Value(cause);
+                    builder.EndObject();
+                }
+
+                builder.EndArray()
+                    .Key("matched").Value(matched)
+                    .Key("scanned").Value(scanned)
+                    .Key("truncated").Value(matched >= limit);
+
+                return builder.ToString();
+            }
+            catch (Exception ex)
+            {
+                return BuildError("search-failed", ex.Message);
+            }
+        }
+
+        /// <summary>
+        /// Diff two events — shader/pass change, keyword set delta,
+        /// render-state diff, RT change, geometry delta.
+        /// </summary>
+        public static string Compare(int indexA, int indexB)
+        {
+            if (!IsAvailable(out string err)) return err;
+
+            try
+            {
+                int count = GetCount();
+                if (count <= 0)
+                    return BuildError("no-events", "Frame Debugger has no events — call framedebug/capture first");
+                if (indexA < 0 || indexA >= count) return BuildError("index-out-of-range", $"indexA {indexA} not in [0,{count - 1}]");
+                if (indexB < 0 || indexB >= count) return BuildError("index-out-of-range", $"indexB {indexB} not in [0,{count - 1}]");
+
+                object edA = TryGetEventData(indexA);
+                object edB = TryGetEventData(indexB);
+                if (edA == null || edB == null)
+                    return BuildError("no-event-data", "GetFrameEventData returned null for one or both indices");
+
+                var tA = edA.GetType();
+                var tB = edB.GetType();
+
+                string shaderA = ReadString(edA, tA, "shaderName");
+                string shaderB = ReadString(edB, tB, "shaderName");
+                string passA = ReadString(edA, tA, "passName");
+                string passB = ReadString(edB, tB, "passName");
+
+                var kwA = ReadStringArray(edA, tA, "shaderKeywords") ?? new string[0];
+                var kwB = ReadStringArray(edB, tB, "shaderKeywords") ?? new string[0];
+                var setA = new HashSet<string>(kwA, StringComparer.Ordinal);
+                var setB = new HashSet<string>(kwB, StringComparer.Ordinal);
+                var added = new List<string>();
+                var removed = new List<string>();
+                foreach (var k in kwB) if (!string.IsNullOrEmpty(k) && !setA.Contains(k)) added.Add(k);
+                foreach (var k in kwA) if (!string.IsNullOrEmpty(k) && !setB.Contains(k)) removed.Add(k);
+
+                int rtWA = ReadInt(edA, tA, "rtWidth", 0),   rtHA = ReadInt(edA, tA, "rtHeight", 0);
+                int rtWB = ReadInt(edB, tB, "rtWidth", 0),   rtHB = ReadInt(edB, tB, "rtHeight", 0);
+                int rtCA = ReadInt(edA, tA, "rtCount", 0),   rtCB = ReadInt(edB, tB, "rtCount", 0);
+
+                int vA = ReadInt(edA, tA, "vertexCount", 0), vB = ReadInt(edB, tB, "vertexCount", 0);
+                int iA = ReadInt(edA, tA, "indexCount", 0),  iB = ReadInt(edB, tB, "indexCount", 0);
+                int nA = ReadInt(edA, tA, "instanceCount", 0), nB = ReadInt(edB, tB, "instanceCount", 0);
+
+                string causeA = ReadString(edA, tA, "batchBreakCauseStr"); if (string.IsNullOrEmpty(causeA)) causeA = ReadString(edA, tA, "batchBreakCause");
+                string causeB = ReadString(edB, tB, "batchBreakCauseStr"); if (string.IsNullOrEmpty(causeB)) causeB = ReadString(edB, tB, "batchBreakCause");
+
+                var builder = JsonHelper.StartObject()
+                    .Key("indexA").Value(indexA)
+                    .Key("indexB").Value(indexB)
+                    .Key("shaderChanged").Value(!string.Equals(shaderA, shaderB, StringComparison.Ordinal))
+                    .Key("passChanged").Value(!string.Equals(passA, passB, StringComparison.Ordinal))
+                    .Key("shader").BeginObject()
+                        .Key("a").Value(shaderA ?? "")
+                        .Key("b").Value(shaderB ?? "")
+                        .EndObject()
+                    .Key("pass").BeginObject()
+                        .Key("a").Value(passA ?? "")
+                        .Key("b").Value(passB ?? "")
+                        .EndObject();
+
+                builder.Key("keywordsDiff").BeginObject();
+                builder.Key("added").BeginArray();
+                foreach (var k in added) builder.Value(k);
+                builder.EndArray();
+                builder.Key("removed").BeginArray();
+                foreach (var k in removed) builder.Value(k);
+                builder.EndArray();
+                builder.Key("unchangedCount").Value(setA.Count - removed.Count);
+                builder.EndObject();
+
+                builder.Key("renderTarget").BeginObject()
+                    .Key("changed").Value(rtWA != rtWB || rtHA != rtHB || rtCA != rtCB)
+                    .Key("a").BeginObject().Key("width").Value(rtWA).Key("height").Value(rtHA).Key("count").Value(rtCA).EndObject()
+                    .Key("b").BeginObject().Key("width").Value(rtWB).Key("height").Value(rtHB).Key("count").Value(rtCB).EndObject()
+                    .EndObject();
+
+                builder.Key("geometry").BeginObject()
+                    .Key("vertexDelta").Value(vB - vA)
+                    .Key("indexDelta").Value(iB - iA)
+                    .Key("instanceDelta").Value(nB - nA)
+                    .Key("a").BeginObject().Key("vertexCount").Value(vA).Key("indexCount").Value(iA).Key("instanceCount").Value(nA).EndObject()
+                    .Key("b").BeginObject().Key("vertexCount").Value(vB).Key("indexCount").Value(iB).Key("instanceCount").Value(nB).EndObject()
+                    .EndObject();
+
+                builder.Key("batchBreak").BeginObject()
+                    .Key("a").Value(causeA ?? "")
+                    .Key("b").Value(causeB ?? "")
+                    .Key("becameBreak").Value(
+                        (string.IsNullOrEmpty(causeA) || causeA == "0") &&
+                        !(string.IsNullOrEmpty(causeB) || causeB == "0"))
+                    .EndObject();
+
+                // Simple render-state diff (raster/blend/depth/stencil via ToString for brevity)
+                string[] stateFields = { "rasterState", "blendState", "depthState", "stencilState", "stencilRef" };
+                builder.Key("stateDiff").BeginArray();
+                foreach (var f in stateFields)
+                {
+                    string a = DescribeField(edA, tA, f);
+                    string b = DescribeField(edB, tB, f);
+                    if (!string.Equals(a, b, StringComparison.Ordinal))
+                    {
+                        builder.BeginObject()
+                            .Key("field").Value(f)
+                            .Key("a").Value(a ?? "")
+                            .Key("b").Value(b ?? "")
+                            .EndObject();
+                    }
+                }
+                builder.EndArray();
+
+                return builder.ToString();
+            }
+            catch (Exception ex)
+            {
+                return BuildError("compare-failed", ex.Message);
+            }
+        }
+
+        private static string DescribeField(object obj, Type t, string name)
+        {
+            var f = t.GetField(name, BindingFlags.Public | BindingFlags.Instance | BindingFlags.NonPublic);
+            if (f == null) return null;
+            try
+            {
+                object v = f.GetValue(obj);
+                if (v == null) return "null";
+                if (v.GetType().IsPrimitive || v is string) return v.ToString();
+                // Nested struct — concat public fields
+                var sb = new System.Text.StringBuilder();
+                var vt = v.GetType();
+                bool first = true;
+                foreach (var sub in vt.GetFields(BindingFlags.Public | BindingFlags.Instance))
+                {
+                    if (!first) sb.Append(',');
+                    first = false;
+                    object sv = sub.GetValue(v);
+                    sb.Append(sub.Name).Append('=').Append(sv);
+                }
+                return sb.ToString();
+            }
+            catch { return null; }
+        }
+
+        private class HotspotEntry
+        {
+            public int index;
+            public string type;
+            public int vertexCount;
+            public int indexCount;
+            public int instanceCount;
+            public long cost;
+        }
+
+        private class ShaderStat
+        {
+            public string shaderName;
+            public string passName;
+            public int events;
+            public long totalVerts;
+            public long totalDrawCalls;
+            public int firstIndex;
+            public int lastIndex;
+        }
+
+        private class RtRange
+        {
+            public string rt;
+            public int startIndex;
+            public int endIndex;
+        }
+
+        private class BatchCause
+        {
+            public string cause;
+            public int count;
+            public int sampleIndex;
+        }
+
+        #endregion
     }
 }
