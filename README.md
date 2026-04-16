@@ -39,6 +39,36 @@ https://github.com/user-attachments/assets/afc01579-e968-4505-81ac-1c56985d0e70
 - **AI Chat 탭** — 셰이더 컨텍스트 기반 자유 대화
 - **Include Graph** — #include 의존성 그래프 시각화
 
+### Frame Debugger AI *(v0.11.0)*
+AI 기반 프레임 디버깅 도구. Unity Frame Debugger 데이터를 AI가 분석하여 렌더링 병목과 배치 브레이크 원인을 찾아줍니다.
+
+- **Overview 탭** — 프레임 요약: 이벤트 수, 버텍스/인덱스 카운트, 이벤트 타입 히스토그램, 핫스팟 Top-12, 셰이더별 통계, 배치 브레이크 원인 분석
+- **Events 탭** — 전체 프레임 이벤트 목록, 클릭하면 셰이더/패스/렌더 스테이트 상세 조회
+- **Compare 탭** — 두 이벤트 간 diff 비교 (셰이더, 키워드 변경, 렌더 스테이트 차이, 배치 브레이크 전환)
+- **AI Chat 탭** — 프레임 데이터 컨텍스트 기반 AI 질의 ("이 드로우콜이 왜 느린가요?")
+- **Tiki-Taka 워크플로우** — Summary → Search → Detail/Compare → RT Snapshot 순으로 AI가 단계적 분석
+
+### AI Chat & Image Generation *(v0.6.0 ~ v0.9.0)*
+독립 AI 채팅 윈도우 + AI 이미지 생성 기능.
+
+- **AI Chat** — Unity 프로젝트 컨텍스트 기반 자유 대화, 에셋 첨부, 대화 히스토리 지원
+- **Image Gen 모드** — Claude가 프롬프트를 최적화한 뒤 이미지 생성
+- **Nano Banana (Gemini)** — Google Gemini API 기반 이미지 생성, 레퍼런스 이미지 편집 지원
+- **ComfyUI (Local)** — 로컬 ComfyUI 서버 연동으로 txt2img / img2img 지원
+- **생성 이미지 저장** — `Assets/GeneratedImages/`에 프로젝트 에셋으로 저장
+
+### SVN Tool *(v0.10.0)*
+Unity 에디터 내 SVN 버전 관리 통합 도구.
+
+- **History 탭** — 파일별 SVN 로그 조회 (최대 50개 리비전), 리비전별 diff, AI 변경사항 설명
+- **Operations 탭** — 프로젝트 전체 `svn status`, 파일 다중 선택, 커밋/리버트/업데이트 일괄 실행
+
+### Shader Include Graph (Standalone) *(v0.10.0)*
+별도 의존성 없이 어떤 Unity 프로젝트에든 드롭인 가능한 셰이더 #include 그래프 시각화 도구.
+
+- **인터랙티브 그래프** — 팬/줌, 노드 클릭으로 파일 정보 조회
+- **파일 분석 패널** — Properties, Keywords, Functions, Structs, Defines 토글 표시
+- `standalone-tools/GrShaderIncludeGraph/` 폴더를 프로젝트 `Editor/` 폴더에 복사하여 사용
 ---
 
 ## Requirements
