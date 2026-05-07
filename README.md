@@ -2,22 +2,8 @@
 
 **AI-powered Unity Editor tools — Error auto-fix, Shader analysis, Frame Debugging, Image Generation & SVN, all powered by Claude Code running headlessly inside the Editor.**
 
-```
-┌──────────────────────────────────────┐
-│          Unity Editor                │
-│  ┌────────────────────────────────┐  │   spawn per request   ┌──────────────────────┐
-│  │   Error Solver                 │  │ ────────────────────► │  node headless.mjs   │
-│  │   Shader Inspector             │  │   stdin JSON          │  (Server~/)          │
-│  │   Frame Debugger AI            │  │ ◄──────────────────── │  Claude Agent SDK    │
-│  │   AI Chat / Image Gen          │  │   stdout JSON lines   └──────────────────────┘
-│  │   SVN Tool                     │  │
-│  └────────────────────────────────┘  │
-│   Everything ships inside the        │
-│   Unity package — no MCP, no npm     │
-└──────────────────────────────────────┘
-```
+![Uploading image.png…]()
 
----
 
 ## Features
 
