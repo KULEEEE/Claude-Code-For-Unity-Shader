@@ -2,8 +2,7 @@
 
 **AI-powered Unity Editor tools — Error auto-fix, Shader analysis, Frame Debugging, Image Generation & SVN, all powered by Claude Code running headlessly inside the Editor.**
 
-![Uploading image.png…]()
-
+<img width="2761" height="1449" alt="image" src="https://github.com/user-attachments/assets/e9ba5421-4e13-4c9d-aa6f-c72436b7bddf" />
 
 ## Features
 
