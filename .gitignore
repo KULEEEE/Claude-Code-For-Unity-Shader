@@ -2,8 +2,13 @@
 node_modules/
 npm-debug.log*
 
-# TypeScript build output (source is bundled into dist/)
-claude-plugin/servers/shader-mcp-server/build/
+# Keep the runtime node_modules that ship inside the Unity package's Server~ folder.
+# Server.src~/node_modules/ stays ignored — it's only the build-time toolchain.
+!unity-package/Server~/node_modules/
+!unity-package/Server~/node_modules/**
+
+# TypeScript build output for the bundled headless runner
+unity-package/Server.src~/build/
 
 # OS files
 .DS_Store

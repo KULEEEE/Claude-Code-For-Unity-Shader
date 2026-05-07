@@ -1,5 +1,7 @@
 using UnityEditor;
+using UnityEditor.UIElements;
 using UnityEngine;
+using UnityEngine.UIElements;
 
 namespace UnityAgent.Editor
 {
@@ -153,7 +155,14 @@ namespace UnityAgent.Editor
             GUILayout.FlexibleSpace();
             EditorGUILayout.BeginHorizontal(ShaderInspectorStyles.StatusBar);
 
-            if (_isCaptured)
+            if (IsCacheBuilding)
+            {
+                var old2 = GUI.color;
+                GUI.color = ShaderInspectorStyles.CyanStatus;
+                GUILayout.Label($"Caching: {_cacheCurrent}/{_cacheTotal}");
+                GUI.color = old2;
+            }
+            else if (_isCaptured)
                 GUILayout.Label($"Captured: {_eventCount} events");
             else if (!string.IsNullOrEmpty(_lastError))
             {
@@ -163,7 +172,7 @@ namespace UnityAgent.Editor
                 GUI.color = old;
             }
             else
-                GUILayout.Label("Not captured — press 'Capture Frame' while Play Mode is active");
+                GUILayout.Label("Play Mode에서 Capture Frame 클릭");
 
             GUILayout.FlexibleSpace();
 
@@ -179,31 +188,88 @@ namespace UnityAgent.Editor
 
         #region Capture API (shared with tabs)
 
-        /// <summary>Capture current frame + pull a summary. Enters FD if not already on.</summary>
+        /// <summary>
+        /// Read current frame data from the FD capture system.
+        /// If FD is not active, try to enable it. If that fails, guide the user.
+        /// </summary>
         public void CaptureFrame()
         {
-            if (!EditorApplication.isPlaying)
-            {
-                _lastError = "Enter Play Mode first — FrameDebugger only captures during play";
-                _isCaptured = false;
-                Repaint();
-                return;
-            }
-
-            // Capture with a modest cap — summary() pulls full deep-sweep data anyway.
-            string capJson = FrameDebugBridge.Capture(maxEvents: 256, includeShaders: false);
-            string err = JsonHelper.GetString(capJson, "error");
-            if (!string.IsNullOrEmpty(err))
-            {
-                _lastError = err + " : " + (JsonHelper.GetString(capJson, "detail") ?? "");
-                _isCaptured = false;
-                Repaint();
-                return;
-            }
-
             _lastError = null;
-            _isCaptured = true;
-            RefreshSummary();
+
+            // FD already active with events? Just refresh + cache.
+            int count = JsonHelper.GetInt(FrameDebugBridge.Status(), "eventCount", 0);
+            if (count > 0)
+            {
+                _isCaptured = true;
+                RefreshSummary();
+                Repaint();
+                return;
+            }
+
+            // FD not active — open FD window, then try to auto-click Enable
+            EditorApplication.ExecuteMenuItem("Window/Analysis/Frame Debugger");
+            _autoEnableTick = 0;
+            EditorApplication.update -= AutoEnableAndCapture;
+            EditorApplication.update += AutoEnableAndCapture;
+            Repaint();
+        }
+
+        private int _autoEnableTick;
+
+        private void AutoEnableAndCapture()
+        {
+            _autoEnableTick++;
+
+            // Check if FD got enabled (by us or by user)
+            int count = JsonHelper.GetInt(FrameDebugBridge.Status(), "eventCount", 0);
+            if (count > 0)
+            {
+                EditorApplication.update -= AutoEnableAndCapture;
+                _lastError = null;
+                _isCaptured = true;
+                RefreshSummary();
+                Repaint();
+                return;
+            }
+
+            // Try to auto-click Enable via UITK at tick 5, 15, 30
+            if (_autoEnableTick == 5 || _autoEnableTick == 15 || _autoEnableTick == 30)
+            {
+                try
+                {
+                    var asm = typeof(UnityEditor.Editor).Assembly;
+                    var fdWindowType = asm.GetType("UnityEditor.FrameDebuggerWindow");
+                    if (fdWindowType != null)
+                    {
+                        var fdWindow = Resources.FindObjectsOfTypeAll(fdWindowType);
+                        if (fdWindow.Length > 0)
+                        {
+                            var window = fdWindow[0] as EditorWindow;
+                            var root = window?.rootVisualElement;
+                            if (root != null)
+                            {
+                                // Find ALL toggles and try each
+                                var toggles = root.Query<Toggle>().ToList();
+                                foreach (var t in toggles)
+                                {
+                                    if (!t.value) { t.value = true; break; }
+                                }
+
+                                // Also try ToolbarToggle
+                                var tbToggles = root.Query<ToolbarToggle>().ToList();
+                                foreach (var t in tbToggles)
+                                {
+                                    if (!t.value) { t.value = true; break; }
+                                }
+                            }
+                        }
+                    }
+                }
+                catch { }
+
+                // Also try SetEnabled as fallback
+                FrameDebugBridge.EnableCapture();
+            }
         }
 
         /// <summary>Re-pull summary without resetting FD.</summary>
@@ -223,6 +289,9 @@ namespace UnityAgent.Editor
                 _eventCount = JsonHelper.GetInt(json, "eventCount", 0);
                 _isCaptured = _eventCount > 0 || _isCaptured;
                 _overviewTab?.OnSummaryChanged(json);
+
+                // Start background cache build (1 event per render frame)
+                StartCacheBuilder(_eventCount);
             }
             Repaint();
         }
@@ -230,6 +299,61 @@ namespace UnityAgent.Editor
         public string LastSummaryJson => _lastSummaryJson;
         public int EventCount => _eventCount;
         public bool IsCaptured => _isCaptured;
+        public bool IsCacheBuilding => _cacheTotal > 0 && _cacheCurrent < _cacheTotal;
+        public int CacheCurrent => _cacheCurrent;
+        public int CacheTotal => _cacheTotal;
+
+        #endregion
+
+        #region Async Cache Builder
+
+        private int _cacheCurrent;
+        private int _cacheTotal;
+        private bool _cachePhaseRead; // false=SetLimit, true=Read
+
+        private void StartCacheBuilder(int totalEvents)
+        {
+            FrameDebugBridge.ClearCache();
+            _cacheCurrent = 0;
+            _cacheTotal = totalEvents;
+            _cachePhaseRead = false;
+            EditorUtility.DisplayProgressBar("Frame Debugger AI", "Loading event data...", 0);
+            EditorApplication.update -= CacheBuilderTick;
+            EditorApplication.update += CacheBuilderTick;
+        }
+
+        private void CacheBuilderTick()
+        {
+            if (_cacheCurrent >= _cacheTotal)
+            {
+                EditorApplication.update -= CacheBuilderTick;
+                EditorUtility.ClearProgressBar();
+                _cacheTotal = 0;
+                Repaint();
+                return;
+            }
+
+            if (!_cachePhaseRead)
+            {
+                // Phase 1: SetLimit + force render
+                FrameDebugBridge.SetLimitPublic(_cacheCurrent + 1);
+                _cachePhaseRead = true;
+            }
+            else
+            {
+                // Phase 2: Read data
+                string detail = FrameDebugBridge.GetEventDetail(_cacheCurrent);
+                if (!string.IsNullOrEmpty(detail))
+                    FrameDebugBridge.CacheEventDetail(_cacheCurrent, detail);
+
+                _cacheCurrent++;
+                _cachePhaseRead = false;
+
+                float pct = (float)_cacheCurrent / _cacheTotal;
+                EditorUtility.DisplayProgressBar("Frame Debugger AI",
+                    $"Loading event data... {_cacheCurrent}/{_cacheTotal}", pct);
+            }
+        }
 
         #endregion
 
@@ -261,12 +385,30 @@ namespace UnityAgent.Editor
         /// <summary>
         /// Jump to AI Chat, pre-load a frame-context block, and optionally auto-send a prompt.
         /// </summary>
-        public void AskAIAboutFrame(string prompt, string contextBlock, string contextLabel)
+        public void AskAIAboutFrame(string prompt, string contextBlock, string contextLabel, string imagePath = null)
         {
             _currentTab = Tab.AIChat;
             _aiChatTab?.SetContext(contextLabel, contextLabel);
-            if (!string.IsNullOrEmpty(prompt))
+
+            if (!string.IsNullOrEmpty(imagePath))
+            {
+                // Include image in context for AI to analyze
+                string imageContext = contextBlock + $"\n\n[RT Screenshot: {imagePath}]";
+                _aiChatTab?.AskQuestion(prompt, imageContext);
+
+                // Also show the image inline in chat
+                try
+                {
+                    byte[] pngData = System.IO.File.ReadAllBytes(imagePath);
+                    string base64 = System.Convert.ToBase64String(pngData);
+                    _aiChatTab?.AddGeneratedImage(base64, $"Event render target");
+                }
+                catch { }
+            }
+            else if (!string.IsNullOrEmpty(prompt))
+            {
                 _aiChatTab?.AskQuestion(prompt, contextBlock);
+            }
             Repaint();
         }
 

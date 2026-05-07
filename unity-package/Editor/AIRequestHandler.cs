@@ -1,16 +1,20 @@
 using System;
+using System.Collections.Concurrent;
 using System.Collections.Generic;
+using System.Diagnostics;
+using System.IO;
 using System.Text;
 using UnityEditor;
 using UnityEngine;
+using Debug = UnityEngine.Debug;
 
 namespace UnityAgent.Editor
 {
     /// <summary>
-    /// Manages AI query requests from the Inspector to the MCP server.
-    /// Uses the existing WebSocket connection (Unity is server, MCP is client).
-    /// Unity sends "ai/query" messages to the connected MCP client, which calls Claude CLI.
-    /// Supports streaming responses via onChunk callback.
+    /// Dispatches AI queries by spawning the bundled headless Node runner
+    /// (Server~/headless.mjs) per request. One line of JSON goes down stdin;
+    /// JSON-line events stream back on stdout and are dispatched on the main
+    /// thread to chunk/status/complete/image callbacks.
     /// </summary>
     public static class AIRequestHandler
     {
@@ -19,53 +23,47 @@ namespace UnityAgent.Editor
             public Action<string> onChunk;
             public Action<string> onComplete;
             public Action<string> onStatus;
+            public Process process;
             public StringBuilder accumulated = new StringBuilder();
+            public bool finished;
         }
 
         private static readonly Dictionary<string, PendingRequest> _pendingRequests =
             new Dictionary<string, PendingRequest>();
+        private static readonly ConcurrentQueue<Action> _mainThreadActions = new ConcurrentQueue<Action>();
         private static readonly object _lock = new object();
+        private static bool _updateHooked;
 
-        /// <summary>
-        /// Whether there are any pending AI requests awaiting responses.
-        /// </summary>
         public static bool HasPendingRequests
         {
             get { lock (_lock) { return _pendingRequests.Count > 0; } }
         }
 
         /// <summary>
-        /// Whether AI functionality is available (MCP server connected).
+        /// AI is available whenever Node.js is discoverable.
         /// </summary>
         public static bool IsAvailable => UnityAgentServer.IsClientConnected;
 
-        /// <summary>
-        /// Send an AI query (legacy single-callback overload for backward compatibility).
-        /// </summary>
         public static void SendQuery(string prompt, string context, Action<string> onResponse)
         {
             SendQuery(prompt, context, null, onResponse);
         }
 
-        /// <summary>
-        /// Send an AI query with streaming support.
-        /// </summary>
-        /// <param name="prompt">The user's question or analysis prompt.</param>
-        /// <param name="context">Optional context to include (asset code, info, etc.).</param>
-        /// <param name="onChunk">Called for each streaming chunk (may be null).</param>
-        /// <param name="onComplete">Called with the full response text when complete.</param>
-        /// <param name="onStatus">Called with progress status updates (may be null).</param>
-        public static void SendQuery(string prompt, string context, Action<string> onChunk, Action<string> onComplete, Action<string> onStatus = null, string language = null)
+        public static void SendQuery(
+            string prompt,
+            string context,
+            Action<string> onChunk,
+            Action<string> onComplete,
+            Action<string> onStatus = null,
+            string language = null)
         {
             if (!IsAvailable)
             {
-                onComplete?.Invoke("AI is not available. Ensure the MCP server is connected to the Unity WebSocket server.");
+                onComplete?.Invoke("AI is not available. Ensure Node.js 18+ is installed.");
                 return;
             }
 
             string id = Guid.NewGuid().ToString();
-
-            // Build JSON message
             var msgBuilder = JsonHelper.StartObject()
                 .Key("id").Value(id)
                 .Key("method").Value("ai/query")
@@ -74,18 +72,54 @@ namespace UnityAgent.Editor
 
             if (!string.IsNullOrEmpty(context))
                 msgBuilder.Key("context").Value(context);
+            if (!string.IsNullOrEmpty(language))
+                msgBuilder.Key("language").Value(language);
+
+            string projectPath = Path.GetFullPath(Path.Combine(Application.dataPath, ".."));
+            msgBuilder.Key("projectPath").Value(projectPath);
+
+            AppendBackendOptions(msgBuilder, id);
+
+            msgBuilder.EndObject();
+            Launch(id, msgBuilder.ToString(), onChunk, onComplete, onStatus);
+        }
+
+        public static void SendImageEnhance(
+            string prompt,
+            Action<string> onStatus,
+            Action<string> onComplete,
+            string language = null)
+        {
+            if (!IsAvailable)
+            {
+                onComplete?.Invoke("AI is not available.");
+                return;
+            }
+
+            string id = Guid.NewGuid().ToString();
+            var msgBuilder = JsonHelper.StartObject()
+                .Key("id").Value(id)
+                .Key("method").Value("image/enhance")
+                .Key("params").BeginObject()
+                    .Key("prompt").Value(prompt);
 
             if (!string.IsNullOrEmpty(language))
                 msgBuilder.Key("language").Value(language);
 
-            // Send Unity project path so the agent can operate on project files
-            string projectPath = System.IO.Path.GetFullPath(
-                System.IO.Path.Combine(UnityEngine.Application.dataPath, ".."));
+            string projectPath = Path.GetFullPath(Path.Combine(Application.dataPath, ".."));
             msgBuilder.Key("projectPath").Value(projectPath);
 
-            // Image backend settings
+            AppendBackendOptions(msgBuilder, id);
+
+            msgBuilder.EndObject();
+            Launch(id, msgBuilder.ToString(), null, onComplete, onStatus);
+        }
+
+        private static void AppendBackendOptions(JsonHelper.JsonBuilder msgBuilder, string id)
+        {
             string imageBackend = EditorPrefs.GetString("UnityAgent_ImageBackend", "gemini");
             msgBuilder.Key("imageBackend").Value(imageBackend);
+
             if (imageBackend == "comfyui")
             {
                 string comfyUrl = EditorPrefs.GetString("UnityAgent_ComfyUIUrl", "http://127.0.0.1:8188");
@@ -101,201 +135,182 @@ namespace UnityAgent.Editor
                     !string.IsNullOrEmpty(geminiModel) ? geminiModel : "gemini-2.5-flash-image");
             }
 
-            // Reference image: save to temp file and pass path (base64 too large for WebSocket)
             string refImageBase64 = GetReferenceImageBase64();
             if (!string.IsNullOrEmpty(refImageBase64))
             {
-                string tempPath = System.IO.Path.Combine(
-                    System.IO.Path.GetTempPath(),
-                    $"unity-agent-ref-{id}.b64");
-                System.IO.File.WriteAllText(tempPath, refImageBase64);
+                string tempPath = Path.Combine(Path.GetTempPath(), $"unity-agent-ref-{id}.b64");
+                File.WriteAllText(tempPath, refImageBase64);
                 msgBuilder.Key("referenceImagePath").Value(tempPath);
             }
+        }
 
-            msgBuilder.EndObject();
-            string message = msgBuilder.ToString();
+        private static void Launch(
+            string id,
+            string payload,
+            Action<string> onChunk,
+            Action<string> onComplete,
+            Action<string> onStatus)
+        {
+            string nodeExe = UnityAgentServer.GetNodeExecutable();
+            string scriptPath = UnityAgentServer.GetHeadlessScriptPath();
 
-            lock (_lock)
+            if (nodeExe == null || !File.Exists(nodeExe))
             {
-                _pendingRequests[id] = new PendingRequest
-                {
-                    onChunk = onChunk,
-                    onComplete = onComplete,
-                    onStatus = onStatus
-                };
+                onComplete?.Invoke("AI Error: Node.js executable not found.");
+                return;
             }
+            if (!File.Exists(scriptPath))
+            {
+                onComplete?.Invoke($"AI Error: Headless script missing at {scriptPath}");
+                return;
+            }
+
+            var startInfo = new ProcessStartInfo
+            {
+                FileName = nodeExe,
+                Arguments = $"\"{scriptPath}\"",
+                UseShellExecute = false,
+                RedirectStandardInput = true,
+                RedirectStandardOutput = true,
+                RedirectStandardError = true,
+                CreateNoWindow = true,
+                StandardOutputEncoding = Encoding.UTF8,
+                StandardErrorEncoding = Encoding.UTF8,
+            };
+
+            var proc = new Process { StartInfo = startInfo, EnableRaisingEvents = true };
+            var pending = new PendingRequest
+            {
+                onChunk = onChunk,
+                onComplete = onComplete,
+                onStatus = onStatus,
+                process = proc,
+            };
+
+            proc.OutputDataReceived += (_, args) =>
+            {
+                if (string.IsNullOrEmpty(args.Data)) return;
+                string line = args.Data;
+                _mainThreadActions.Enqueue(() => HandleEvent(id, line));
+            };
+            proc.ErrorDataReceived += (_, args) =>
+            {
+                if (string.IsNullOrEmpty(args.Data)) return;
+                Debug.Log($"[UnityAgent] [headless] {args.Data}");
+            };
+            proc.Exited += (_, __) =>
+            {
+                _mainThreadActions.Enqueue(() => FinalizeIfNeeded(id, null));
+            };
+
+            lock (_lock) { _pendingRequests[id] = pending; }
+            EnsureUpdateHook();
 
             try
             {
-                UnityAgentServer.SendToClient(message);
+                proc.Start();
+                proc.BeginOutputReadLine();
+                proc.BeginErrorReadLine();
+                proc.StandardInput.WriteLine(payload);
+                proc.StandardInput.Close();
                 Debug.Log($"[UnityAgent] AI query sent (id={id})");
             }
             catch (Exception ex)
             {
                 lock (_lock) { _pendingRequests.Remove(id); }
-                onComplete?.Invoke($"Failed to send AI query: {ex.Message}");
+                onComplete?.Invoke($"Failed to launch headless runner: {ex.Message}");
             }
         }
 
-        /// <summary>
-        /// Send an image generation request: Claude enhances the prompt, then Gemini generates.
-        /// Uses "image/enhance" method instead of "ai/query".
-        /// </summary>
-        public static void SendImageEnhance(string prompt, Action<string> onStatus, Action<string> onComplete, string language = null)
+        private static void HandleEvent(string id, string jsonLine)
         {
-            if (!IsAvailable)
+            string type = JsonHelper.GetString(jsonLine, "type");
+            if (string.IsNullOrEmpty(type)) return;
+
+            PendingRequest request;
+            lock (_lock) { _pendingRequests.TryGetValue(id, out request); }
+            if (request == null) return;
+
+            switch (type)
             {
-                onComplete?.Invoke("AI is not available.");
-                return;
+                case "status":
+                    request.onStatus?.Invoke(JsonHelper.GetString(jsonLine, "data") ?? "");
+                    break;
+                case "chunk":
+                    {
+                        string chunk = JsonHelper.GetString(jsonLine, "data") ?? "";
+                        request.accumulated.Append(chunk);
+                        request.onChunk?.Invoke(chunk);
+                    }
+                    break;
+                case "image":
+                    {
+                        string data = JsonHelper.GetString(jsonLine, "data") ?? "";
+                        string description = JsonHelper.GetString(jsonLine, "description") ?? "";
+                        if (!string.IsNullOrEmpty(data))
+                            NanoBananaReceiver.HandleImageReceived(data, description);
+                    }
+                    break;
+                case "result":
+                    FinalizeIfNeeded(id, JsonHelper.GetString(jsonLine, "data") ?? "");
+                    break;
+                case "error":
+                    FinalizeIfNeeded(id, $"AI Error: {JsonHelper.GetString(jsonLine, "data") ?? ""}");
+                    break;
             }
+        }
 
-            string id = Guid.NewGuid().ToString();
-
-            var msgBuilder = JsonHelper.StartObject()
-                .Key("id").Value(id)
-                .Key("method").Value("image/enhance")
-                .Key("params").BeginObject()
-                    .Key("prompt").Value(prompt);
-
-            if (!string.IsNullOrEmpty(language))
-                msgBuilder.Key("language").Value(language);
-
-            string projectPath = System.IO.Path.GetFullPath(
-                System.IO.Path.Combine(UnityEngine.Application.dataPath, ".."));
-            msgBuilder.Key("projectPath").Value(projectPath);
-
-            // Backend settings
-            string imageBackend2 = EditorPrefs.GetString("UnityAgent_ImageBackend", "gemini");
-            msgBuilder.Key("imageBackend").Value(imageBackend2);
-
-            if (imageBackend2 == "comfyui")
-            {
-                string comfyUrl = EditorPrefs.GetString("UnityAgent_ComfyUIUrl", "http://127.0.0.1:8188");
-                msgBuilder.Key("comfyuiUrl").Value(comfyUrl);
-            }
-
-            string geminiApiKey2 = EditorPrefs.GetString("UnityAgent_GeminiApiKey", "");
-            string geminiModel2 = EditorPrefs.GetString("UnityAgent_GeminiModel", "");
-            if (!string.IsNullOrEmpty(geminiApiKey2))
-            {
-                msgBuilder.Key("geminiApiKey").Value(geminiApiKey2);
-                msgBuilder.Key("geminiModel").Value(
-                    !string.IsNullOrEmpty(geminiModel2) ? geminiModel2 : "gemini-2.5-flash-image");
-            }
-
-            // Reference image path
-            string refImageBase64 = GetReferenceImageBase64();
-            if (!string.IsNullOrEmpty(refImageBase64))
-            {
-                string tempPath = System.IO.Path.Combine(
-                    System.IO.Path.GetTempPath(), $"unity-agent-ref-{id}.b64");
-                System.IO.File.WriteAllText(tempPath, refImageBase64);
-                msgBuilder.Key("referenceImagePath").Value(tempPath);
-            }
-
-            msgBuilder.EndObject();
-            string message = msgBuilder.ToString();
-
+        private static void FinalizeIfNeeded(string id, string finalText)
+        {
+            PendingRequest request;
             lock (_lock)
             {
-                _pendingRequests[id] = new PendingRequest
-                {
-                    onChunk = null,
-                    onComplete = onComplete,
-                    onStatus = onStatus
-                };
+                if (!_pendingRequests.TryGetValue(id, out request)) return;
+                if (request.finished && finalText == null) return;
+                if (finalText != null) request.finished = true;
+                if (request.finished) _pendingRequests.Remove(id);
             }
+
+            if (finalText == null)
+            {
+                if (request.finished) return;
+                finalText = request.accumulated.Length > 0
+                    ? request.accumulated.ToString()
+                    : "(headless runner exited without a result)";
+                request.finished = true;
+                lock (_lock) { _pendingRequests.Remove(id); }
+            }
+
+            try { request.onComplete?.Invoke(finalText); }
+            catch (Exception ex) { Debug.LogError($"[UnityAgent] onComplete threw: {ex}"); }
 
             try
             {
-                UnityAgentServer.SendToClient(message);
-                Debug.Log($"[UnityAgent] Image enhance sent (id={id})");
+                if (request.process != null && !request.process.HasExited)
+                {
+                    try { request.process.Kill(); } catch { }
+                }
+                request.process?.Dispose();
             }
-            catch (Exception ex)
-            {
-                lock (_lock) { _pendingRequests.Remove(id); }
-                onComplete?.Invoke($"Failed to send image enhance: {ex.Message}");
-            }
+            catch { }
         }
 
-        /// <summary>
-        /// Handle a status update received from the MCP server.
-        /// Called by UnityAgentServer when it receives an "ai/status" message.
-        /// </summary>
-        public static void HandleStatus(string id, string status)
+        private static void EnsureUpdateHook()
         {
-            PendingRequest request = null;
-            lock (_lock)
-            {
-                _pendingRequests.TryGetValue(id, out request);
-            }
-
-            if (request != null)
-            {
-                request.onStatus?.Invoke(status);
-            }
+            if (_updateHooked) return;
+            _updateHooked = true;
+            EditorApplication.update += PumpMainThread;
         }
 
-        /// <summary>
-        /// Handle a streaming chunk received from the MCP server.
-        /// Called by UnityAgentServer when it receives an "ai/chunk" message.
-        /// </summary>
-        public static void HandleChunk(string id, string chunk)
+        private static void PumpMainThread()
         {
-            PendingRequest request = null;
-            lock (_lock)
+            while (_mainThreadActions.TryDequeue(out var action))
             {
-                _pendingRequests.TryGetValue(id, out request);
-            }
-
-            if (request != null)
-            {
-                request.accumulated.Append(chunk);
-                request.onChunk?.Invoke(chunk);
+                try { action(); }
+                catch (Exception ex) { Debug.LogError($"[UnityAgent] Dispatch error: {ex}"); }
             }
         }
 
-        /// <summary>
-        /// Handle an AI response received from the MCP server.
-        /// Called by UnityAgentServer when it receives an "ai/response" message.
-        /// </summary>
-        public static void HandleResponse(string id, string responseText)
-        {
-            PendingRequest request = null;
-            lock (_lock)
-            {
-                if (_pendingRequests.TryGetValue(id, out request))
-                    _pendingRequests.Remove(id);
-            }
-
-            if (request != null)
-            {
-                request.onComplete?.Invoke(responseText);
-            }
-            else
-            {
-                Debug.LogWarning($"[UnityAgent] Received AI response for unknown id: {id}");
-            }
-        }
-
-        /// <summary>
-        /// Handle an AI error response.
-        /// </summary>
-        public static void HandleError(string id, string errorMessage)
-        {
-            PendingRequest request = null;
-            lock (_lock)
-            {
-                if (_pendingRequests.TryGetValue(id, out request))
-                    _pendingRequests.Remove(id);
-            }
-
-            request?.onComplete?.Invoke($"AI Error: {errorMessage}");
-        }
-
-        /// <summary>
-        /// Get the reference image from the active AIChatWindow as base64 PNG.
-        /// </summary>
         private static string GetReferenceImageBase64()
         {
             var windows = Resources.FindObjectsOfTypeAll<AIChatWindow>();
@@ -306,7 +321,6 @@ namespace UnityAgent.Editor
 
             try
             {
-                // Need readable texture — make a copy via RenderTexture
                 RenderTexture rt = RenderTexture.GetTemporary(refImage.width, refImage.height);
                 Graphics.Blit(refImage, rt);
                 RenderTexture prev = RenderTexture.active;

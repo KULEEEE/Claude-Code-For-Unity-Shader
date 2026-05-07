@@ -32,11 +32,33 @@ namespace UnityAgent.Editor
         private static MethodInfo _methodSetEnabled;
         private static MethodInfo _methodGetFrameEvents;
         private static MethodInfo _methodGetFrameEventData;
+        private static MethodInfo _methodGetFrameEventInfoName;
 
         // Enable strategy: property setter vs. SetEnabled(bool, int)
         private static bool _hasSetEnabledMethod;
 
         private static string _lastReflectionError;
+
+        // Event detail cache — populated in one synchronous pass after Summary()
+        private static readonly Dictionary<int, string> _eventDetailCache = new Dictionary<int, string>();
+
+        /// <summary>Force re-discovery of all reflection targets. Use after domain reload issues.</summary>
+        public static void ResetReflection()
+        {
+            _reflectionInitialized = false;
+            _fdUtil = null;
+            _fdEvent = null;
+            _fdEventData = null;
+            _fdEventType = null;
+            _propCount = null;
+            _propLimit = null;
+            _propEnabled = null;
+            _methodSetEnabled = null;
+            _methodGetFrameEvents = null;
+            _methodGetFrameEventData = null;
+            _hasSetEnabledMethod = false;
+            _lastReflectionError = null;
+        }
 
         private static void InitReflection()
         {
@@ -45,24 +67,53 @@ namespace UnityAgent.Editor
 
             try
             {
-                // FrameDebuggerUtility lives in UnityEditor assembly, UnityEditorInternal namespace.
+                // FrameDebuggerUtility location differs by Unity version:
+                //   Unity 2019–2022: UnityEditorInternal.FrameDebuggerUtility
+                //   Unity 6 (6000.x)+: UnityEditor.FrameDebugger.FrameDebuggerUtility
                 var unityEditorAsm = typeof(UnityEditor.Editor).Assembly;
 
-                _fdUtil = unityEditorAsm.GetType("UnityEditorInternal.FrameDebuggerUtility")
-                       ?? Type.GetType("UnityEditorInternal.FrameDebuggerUtility, UnityEditor");
-                _fdEvent = unityEditorAsm.GetType("UnityEditorInternal.FrameDebuggerEvent")
-                       ?? Type.GetType("UnityEditorInternal.FrameDebuggerEvent, UnityEditor");
-                _fdEventData = unityEditorAsm.GetType("UnityEditorInternal.FrameDebuggerEventData")
-                       ?? Type.GetType("UnityEditorInternal.FrameDebuggerEventData, UnityEditor");
-                _fdEventType = unityEditorAsm.GetType("UnityEngine.Rendering.FrameEventType")
-                       ?? unityEditorAsm.GetType("UnityEditorInternal.FrameEventType")
-                       ?? Type.GetType("UnityEngine.Rendering.FrameEventType, UnityEngine.CoreModule");
+                // Also scan all loaded assemblies for Unity 6 which may split into sub-assemblies
+                System.Reflection.Assembly[] allAsm = AppDomain.CurrentDomain.GetAssemblies();
+
+                _fdUtil = ResolveType(unityEditorAsm, allAsm,
+                    "UnityEditorInternal.FrameDebuggerInternal.FrameDebuggerUtility",  // Unity 6 (6000.x)
+                    "UnityEditorInternal.FrameDebuggerUtility");                       // Unity 2019–2022
+
+                _fdEvent = ResolveType(unityEditorAsm, allAsm,
+                    "UnityEditorInternal.FrameDebuggerInternal.FrameDebuggerEvent",
+                    "UnityEditorInternal.FrameDebuggerEvent");
+
+                _fdEventData = ResolveType(unityEditorAsm, allAsm,
+                    "UnityEditorInternal.FrameDebuggerInternal.FrameDebuggerEventData",
+                    "UnityEditorInternal.FrameDebuggerEventData");
+
+                _fdEventType = ResolveType(unityEditorAsm, allAsm,
+                    "UnityEditorInternal.FrameDebuggerInternal.FrameEventType",
+                    "UnityEngine.Rendering.FrameEventType",
+                    "UnityEditorInternal.FrameEventType");
 
                 if (_fdUtil == null)
                 {
-                    _lastReflectionError = "FrameDebuggerUtility type not found (Unity internal API unavailable)";
+                    // Dump all FrameDebug-related types found for diagnosis
+                    var candidates = new System.Text.StringBuilder();
+                    foreach (var asm in allAsm)
+                    {
+                        try
+                        {
+                            foreach (var t in asm.GetTypes())
+                                if (t.FullName != null && t.FullName.IndexOf("FrameDebug", StringComparison.OrdinalIgnoreCase) >= 0)
+                                    candidates.AppendLine(t.FullName);
+                        }
+                        catch { }
+                    }
+                    _lastReflectionError =
+                        $"FrameDebuggerUtility type not found (Unity {Application.unityVersion}). " +
+                        $"Candidates:\n{candidates}";
+                    Debug.LogWarning($"[UnityAgent/FrameDebug] {_lastReflectionError}");
                     return;
                 }
+
+                Debug.Log($"[UnityAgent/FrameDebug] Resolved: {_fdUtil.FullName} (Unity {Application.unityVersion})");
 
                 const BindingFlags anyStatic = BindingFlags.Static | BindingFlags.Public | BindingFlags.NonPublic;
 
@@ -76,12 +127,46 @@ namespace UnityAgent.Editor
 
                 _methodGetFrameEvents = _fdUtil.GetMethod("GetFrameEvents", anyStatic);
                 _methodGetFrameEventData = _fdUtil.GetMethod("GetFrameEventData", anyStatic);
+                _methodGetFrameEventInfoName = _fdUtil.GetMethod("GetFrameEventInfoName", anyStatic);
+
             }
             catch (Exception ex)
             {
                 _lastReflectionError = ex.Message;
                 Debug.LogWarning($"[UnityAgent/FrameDebug] Reflection init failed: {ex.Message}");
             }
+        }
+
+        /// <summary>
+        /// Try multiple fully-qualified type names across all loaded assemblies.
+        /// Returns the first match, or null.
+        /// </summary>
+        private static Type ResolveType(System.Reflection.Assembly primaryAsm,
+            System.Reflection.Assembly[] allAsm, params string[] candidates)
+        {
+            foreach (var name in candidates)
+            {
+                var t = primaryAsm.GetType(name);
+                if (t != null) return t;
+                t = Type.GetType(name + ", UnityEditor");
+                if (t != null) return t;
+                t = Type.GetType(name + ", UnityEngine.CoreModule");
+                if (t != null) return t;
+            }
+            // Brute-force scan all assemblies
+            foreach (var name in candidates)
+            {
+                foreach (var asm in allAsm)
+                {
+                    try
+                    {
+                        var t = asm.GetType(name);
+                        if (t != null) return t;
+                    }
+                    catch { }
+                }
+            }
+            return null;
         }
 
         private static bool IsAvailable(out string errorJson)
@@ -359,6 +444,62 @@ namespace UnityAgent.Editor
             }
         }
 
+        /// <summary>
+        /// Get the render target as a Texture2D for a given event.
+        /// Reads m_RenderTargetRenderTexture from EventData directly (Unity 6 compatible).
+        /// Returns null if RT is not available. Caller must destroy the texture when done.
+        /// </summary>
+        public static Texture2D GetRenderTargetTexture(int eventIndex, int maxWidth = 512)
+        {
+            InitReflection();
+            if (_fdEventData == null || _methodGetFrameEventData == null) return null;
+
+            try
+            {
+                SetLimit(eventIndex + 1);
+                EditorApplication.QueuePlayerLoopUpdate();
+
+                object dataObj = Activator.CreateInstance(_fdEventData);
+                var args = new object[] { eventIndex, dataObj };
+                _methodGetFrameEventData.Invoke(null, args);
+                object data = args[1];
+                if (data == null) return null;
+
+                var rtField = FindField(data.GetType(), "renderTargetRenderTexture");
+                if (rtField == null) return null;
+
+                var rt = rtField.GetValue(data) as RenderTexture;
+                if (rt == null) return null;
+
+                int srcW = rt.width;
+                int srcH = rt.height;
+                int targetW = (maxWidth > 0 && srcW > maxWidth) ? maxWidth : srcW;
+                int targetH = (int)Math.Round(srcH * ((double)targetW / srcW));
+
+                var tempRt = RenderTexture.GetTemporary(targetW, targetH, 0,
+                    RenderTextureFormat.ARGB32, RenderTextureReadWrite.sRGB);
+                var prev = RenderTexture.active;
+                try
+                {
+                    Graphics.Blit(rt, tempRt);
+                    RenderTexture.active = tempRt;
+                    var tex = new Texture2D(targetW, targetH, TextureFormat.RGBA32, false);
+                    tex.ReadPixels(new Rect(0, 0, targetW, targetH), 0, 0);
+                    tex.Apply(false, false);
+                    return tex;
+                }
+                finally
+                {
+                    RenderTexture.active = prev;
+                    RenderTexture.ReleaseTemporary(tempRt);
+                }
+            }
+            catch
+            {
+                return null;
+            }
+        }
+
         #endregion
 
         #region Reflection helpers
@@ -369,15 +510,30 @@ namespace UnityAgent.Editor
             {
                 if (_hasSetEnabledMethod)
                 {
-                    // signature: static void SetEnabled(bool enable, int frameEventLimit = -1) in modern Unity
                     var parameters = _methodSetEnabled.GetParameters();
                     if (parameters.Length == 1)
+                    {
                         _methodSetEnabled.Invoke(null, new object[] { enable });
+                    }
                     else if (parameters.Length >= 2)
                     {
+                        // Unity 6: SetEnabled(bool enabled, int remotePlayerGUID)
+                        // Must pass the correct GUID — 0 may not work for local debugging.
+                        int guid = 0;
+                        if (_fdUtil != null)
+                        {
+                            const BindingFlags sf = BindingFlags.Static | BindingFlags.Public | BindingFlags.NonPublic;
+                            var getGuid = _fdUtil.GetMethod("GetRemotePlayerGUID", sf);
+                            if (getGuid != null)
+                            {
+                                object v = getGuid.Invoke(null, null);
+                                if (v is int g) guid = g;
+                            }
+                        }
                         var args = new object[parameters.Length];
                         args[0] = enable;
-                        for (int i = 1; i < args.Length; i++) args[i] = GetDefault(parameters[i].ParameterType);
+                        args[1] = guid;
+                        for (int i = 2; i < args.Length; i++) args[i] = GetDefault(parameters[i].ParameterType);
                         _methodSetEnabled.Invoke(null, args);
                     }
                     return;
@@ -412,10 +568,112 @@ namespace UnityAgent.Editor
             return 0;
         }
 
+        /// <summary>
+        /// Get the display name for a frame event (as shown in Unity's Frame Debugger tree).
+        /// </summary>
+        public static string GetEventName(int index)
+        {
+            InitReflection();
+            if (_methodGetFrameEventInfoName == null) return null;
+            try
+            {
+                return _methodGetFrameEventInfoName.Invoke(null, new object[] { index }) as string;
+            }
+            catch { return null; }
+        }
+
+        /// <summary>
+        /// Returns all event names + types for building a tree view.
+        /// Each entry: (index, name, eventType).
+        /// </summary>
+        public static List<(int index, string name, string type)> GetAllEventNames()
+        {
+            InitReflection();
+            var result = new List<(int, string, string)>();
+            int count = GetCount();
+            if (count == 0) return result;
+            var events = GetFrameEventsArray();
+            for (int i = 0; i < count; i++)
+            {
+                string name = GetEventName(i) ?? $"Event {i}";
+                string type = "";
+                if (events != null && i < events.Length)
+                {
+                    object ev = events.GetValue(i);
+                    if (ev != null) type = ReadEventType(ev, ev.GetType());
+                }
+                result.Add((i, name, type));
+            }
+            return result;
+        }
+
         private static void SetLimit(int limit)
         {
+            InitReflection();
             if (_propLimit != null && _propLimit.CanWrite)
                 _propLimit.SetValue(null, limit);
+        }
+
+        /// <summary>Public wrapper for setting FD limit and forcing FD to process the change.</summary>
+        public static void SetLimitPublic(int limit)
+        {
+            SetLimit(limit);
+            // Force Unity to process the limit change — FD is paused so we need to
+            // trigger a player loop update for the new limit to take effect.
+            EditorApplication.QueuePlayerLoopUpdate();
+        }
+
+        /// <summary>
+        /// Enable Frame Debugger capture via internal API.
+        /// Use UnityEngine.FrameDebugger.enabled to verify if it worked.
+        /// </summary>
+        public static void EnableCapture()
+        {
+            InitReflection();
+            SetEnabledSafe(true);
+            EditorApplication.QueuePlayerLoopUpdate();
+        }
+
+        /// <summary>Check if FD is currently active (public API, no reflection).</summary>
+        public static bool IsCaptureActive => UnityEngine.FrameDebugger.enabled;
+
+        /// <summary>
+        /// Cache all event details in one synchronous pass.
+        /// Call after Summary() when FD is active. Uses sequential SetLimit + GetFrameEventData.
+        /// </summary>
+        public static void CacheAllEventDetails()
+        {
+            _eventDetailCache.Clear();
+            InitReflection();
+            int count = GetCount();
+            if (count == 0) return;
+
+            for (int i = 0; i < count; i++)
+            {
+                SetLimit(i + 1);
+                object eventData = TryGetEventData(i);
+                if (eventData != null)
+                {
+                    _eventDetailCache[i] = BuildEventDetail(i, eventData);
+                }
+            }
+        }
+
+        /// <summary>Get cached event detail. Returns null if not cached.</summary>
+        public static string GetCachedEventDetail(int eventIndex)
+        {
+            return _eventDetailCache.TryGetValue(eventIndex, out var json) ? json : null;
+        }
+
+        public static void ClearCache()
+        {
+            _eventDetailCache.Clear();
+        }
+
+        /// <summary>Store a single event's detail JSON in the cache.</summary>
+        public static void CacheEventDetail(int eventIndex, string json)
+        {
+            _eventDetailCache[eventIndex] = json;
         }
 
         private static Array GetFrameEventsArray()
@@ -433,15 +691,32 @@ namespace UnityAgent.Editor
             if (_methodGetFrameEventData == null || _fdEventData == null) return null;
             try
             {
+                // NOTE: Caller must call SetLimit(eventIndex+1) and wait 1-2 frames
+                // before calling this. Unity 6 FD needs time to process limit changes.
+                // For batch reads (Summary), SetLimit is called per-event sequentially.
+
                 // Signatures vary across Unity versions:
-                //   bool GetFrameEventData(int index, out FrameDebuggerEventData data)
-                //   FrameDebuggerEventData GetFrameEventData(int index)
+                //   Unity 2019–2022: bool GetFrameEventData(int index, out FrameDebuggerEventData data)
+                //   Unity 6 (6000.x): bool GetFrameEventData(int index, FrameDebuggerEventData data)
+                //                     where FrameDebuggerEventData may be a class (pass by ref)
+                //   Legacy: FrameDebuggerEventData GetFrameEventData(int index)
                 var parameters = _methodGetFrameEventData.GetParameters();
-                if (parameters.Length == 2 && parameters[1].IsOut)
+                if (parameters.Length == 2)
                 {
-                    var args = new object[] { eventIndex, null };
-                    bool ok = (bool)_methodGetFrameEventData.Invoke(null, args);
-                    return ok ? args[1] : null;
+                    // Create an instance of FrameDebuggerEventData to pass in.
+                    // Unity 6: FrameDebuggerEventData is a class, method populates it
+                    // and may return False for non-draw events while still filling data.
+                    object dataObj;
+                    if (parameters[1].IsOut)
+                        dataObj = null; // out parameter — runtime creates it
+                    else
+                        dataObj = Activator.CreateInstance(_fdEventData);
+
+                    var args = new object[] { eventIndex, dataObj };
+                    _methodGetFrameEventData.Invoke(null, args);
+                    // Always return the data — Unity 6 returns False for non-draw events
+                    // but still populates the struct/class with valid info.
+                    return args[1];
                 }
                 if (parameters.Length == 1)
                 {
@@ -568,9 +843,61 @@ namespace UnityAgent.Editor
             return builder.ToString();
         }
 
+        // Unity 6 renamed most fields with m_ prefix and some with entirely new names.
+        // This alias table maps old field names to Unity 6 equivalents.
+        private static readonly Dictionary<string, string[]> _fieldAliases = new Dictionary<string, string[]>(StringComparer.Ordinal)
+        {
+            { "type",               new[] { "m_Type" } },
+            { "vertexCount",        new[] { "m_VertexCount" } },
+            { "indexCount",         new[] { "m_IndexCount" } },
+            { "instanceCount",      new[] { "m_InstanceCount" } },
+            { "drawCallCount",      new[] { "m_DrawCallCount" } },
+            { "shaderName",         new[] { "m_OriginalShaderName", "m_RealShaderName" } },
+            { "passName",           new[] { "m_PassName" } },
+            { "passLightMode",      new[] { "m_PassLightMode" } },
+            { "shaderInstanceID",   new[] { "m_ShaderInstanceID" } },
+            { "shaderKeywords",     new[] { "shaderKeywords" } }, // no m_ prefix in Unity 6
+            { "rtWidth",            new[] { "m_RenderTargetWidth" } },
+            { "rtHeight",           new[] { "m_RenderTargetHeight" } },
+            { "rtCount",            new[] { "m_RenderTargetCount" } },
+            { "batchBreakCauseStr", new[] { "m_BatchBreakCause" } },
+            { "batchBreakCause",    new[] { "m_BatchBreakCause" } },
+            { "rasterState",        new[] { "m_RasterState" } },
+            { "blendState",         new[] { "m_BlendState" } },
+            { "depthState",         new[] { "m_DepthState" } },
+            { "stencilState",       new[] { "m_StencilState" } },
+            { "stencilRef",         new[] { "m_StencilRef" } },
+            { "renderTargetRenderTexture", new[] { "m_RenderTargetRenderTexture" } },
+        };
+
+        private static FieldInfo FindField(Type t, string name)
+        {
+            const BindingFlags bf = BindingFlags.Public | BindingFlags.Instance | BindingFlags.NonPublic;
+            // Exact match first
+            var f = t.GetField(name, bf);
+            if (f != null) return f;
+            // Try m_ + PascalCase
+            if (name.Length > 0)
+            {
+                string pascal = "m_" + char.ToUpper(name[0]) + name.Substring(1);
+                f = t.GetField(pascal, bf);
+                if (f != null) return f;
+            }
+            // Try alias table
+            if (_fieldAliases.TryGetValue(name, out var aliases))
+            {
+                foreach (var alias in aliases)
+                {
+                    f = t.GetField(alias, bf);
+                    if (f != null) return f;
+                }
+            }
+            return null;
+        }
+
         private static string ReadEventType(object fdEvent, Type t)
         {
-            var field = t.GetField("type", BindingFlags.Public | BindingFlags.Instance | BindingFlags.NonPublic);
+            var field = FindField(t, "type");
             if (field == null) return "";
             object v = field.GetValue(fdEvent);
             if (v == null) return "";
@@ -579,7 +906,7 @@ namespace UnityAgent.Editor
 
         private static string ReadString(object obj, Type t, string name)
         {
-            var f = t.GetField(name, BindingFlags.Public | BindingFlags.Instance | BindingFlags.NonPublic);
+            var f = FindField(t, name);
             if (f != null)
             {
                 object v = f.GetValue(obj);
@@ -596,7 +923,7 @@ namespace UnityAgent.Editor
 
         private static int ReadInt(object obj, Type t, string name, int fallback)
         {
-            var f = t.GetField(name, BindingFlags.Public | BindingFlags.Instance | BindingFlags.NonPublic);
+            var f = FindField(t, name);
             if (f != null)
             {
                 object v = f.GetValue(obj);
@@ -621,11 +948,17 @@ namespace UnityAgent.Editor
 
         private static string[] ReadStringArray(object obj, Type t, string name)
         {
-            var f = t.GetField(name, BindingFlags.Public | BindingFlags.Instance | BindingFlags.NonPublic);
+            var f = FindField(t, name);
             if (f != null)
             {
                 object v = f.GetValue(obj);
                 if (v is string[] arr) return arr;
+                if (v is string str)
+                {
+                    // Unity 6: shaderKeywords is a single space-separated string
+                    if (string.IsNullOrEmpty(str)) return new string[0];
+                    return str.Split(new[] { ' ' }, StringSplitOptions.RemoveEmptyEntries);
+                }
                 if (v is Array genArr)
                 {
                     var result = new string[genArr.Length];
@@ -830,16 +1163,51 @@ namespace UnityAgent.Editor
                 // Hotspot ranking — cost proxy = max(vertexCount, indexCount/3) * max(1,instanceCount).
                 var hotspotEntries = new List<HotspotEntry>(total);
 
+                // Unity 6: FrameDebuggerEvent only has m_Type and m_Obj.
+                // Geometry fields (vertexCount etc.) moved to FrameDebuggerEventData.
+                // Detect by checking if the first event has a vertexCount field.
+                bool eventHasGeometry = false;
+                if (total > 0)
+                {
+                    object probe = events.GetValue(0);
+                    if (probe != null)
+                        eventHasGeometry = FindField(probe.GetType(), "vertexCount") != null;
+                }
+
                 for (int i = 0; i < total; i++)
                 {
                     object fdEvent = events.GetValue(i);
                     if (fdEvent == null) continue;
                     var t = fdEvent.GetType();
                     string typeStr = ReadEventType(fdEvent, t);
-                    int verts = ReadInt(fdEvent, t, "vertexCount", 0);
-                    int idx = ReadInt(fdEvent, t, "indexCount", 0);
-                    int inst = ReadInt(fdEvent, t, "instanceCount", 0);
-                    int draws = ReadInt(fdEvent, t, "drawCallCount", 0);
+
+                    int verts, idx, inst, draws;
+                    if (eventHasGeometry)
+                    {
+                        // Legacy Unity: geometry on the event struct
+                        verts = ReadInt(fdEvent, t, "vertexCount", 0);
+                        idx = ReadInt(fdEvent, t, "indexCount", 0);
+                        inst = ReadInt(fdEvent, t, "instanceCount", 0);
+                        draws = ReadInt(fdEvent, t, "drawCallCount", 0);
+                    }
+                    else
+                    {
+                        // Unity 6: must read from EventData — set limit first
+                        SetLimit(i + 1);
+                        object ed = TryGetEventData(i);
+                        if (ed != null)
+                        {
+                            var edT = ed.GetType();
+                            verts = ReadInt(ed, edT, "vertexCount", 0);
+                            idx = ReadInt(ed, edT, "indexCount", 0);
+                            inst = ReadInt(ed, edT, "instanceCount", 0);
+                            draws = ReadInt(ed, edT, "drawCallCount", 0);
+                        }
+                        else
+                        {
+                            verts = idx = inst = draws = 0;
+                        }
+                    }
 
                     if (!string.IsNullOrEmpty(typeStr))
                     {
@@ -875,6 +1243,7 @@ namespace UnityAgent.Editor
                 {
                     for (int i = 0; i < deepEnd; i++)
                     {
+                        SetLimit(i + 1);
                         object ed = TryGetEventData(i);
                         if (ed == null) continue;
                         var edT = ed.GetType();
@@ -1119,6 +1488,7 @@ namespace UnityAgent.Editor
                     string[] keywords = null;
                     if (needEventData)
                     {
+                        SetLimit(i + 1);
                         object ed = TryGetEventData(i);
                         if (ed == null) continue;
                         var edT = ed.GetType();

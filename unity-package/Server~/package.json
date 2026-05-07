@@ -1,0 +1,10 @@
+{
+  "name": "unity-agent-headless-runtime",
+  "version": "0.12.0",
+  "private": true,
+  "type": "module",
+  "description": "Runtime files for the Unity Agent headless AI runner. Bundled JS + external SDK in node_modules. Unity ignores this folder (ends with ~).",
+  "dependencies": {
+    "@anthropic-ai/claude-agent-sdk": "^0.1.1"
+  }
+}

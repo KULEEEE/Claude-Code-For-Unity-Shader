@@ -1,16 +1,17 @@
 {
   "name": "com.unity-agent",
-  "version": "0.11.0",
+  "version": "0.12.0",
   "displayName": "Unity Agent",
-  "description": "AI-powered Unity Editor plugin with shader analysis and error auto-fix. Connects to Claude Code via MCP.",
+  "description": "AI-powered Unity Editor plugin — shader analysis, error auto-fix, frame debugger AI, and AI chat driven by Claude Code running headlessly inside Unity.",
   "unity": "2021.3",
   "keywords": [
     "error",
     "debug",
-    "mcp",
     "claude",
     "ai",
-    "auto-fix"
+    "auto-fix",
+    "shader",
+    "frame-debugger"
   ],
   "author": {
     "name": "Unity Agent"

@@ -1,20 +1,20 @@
 # Unity Agent
 
-**AI-powered Unity Editor tools — Error auto-fix & Shader analysis via Claude Code**
+**AI-powered Unity Editor tools — Error auto-fix, Shader analysis, Frame Debugging, Image Generation & SVN, all powered by Claude Code running headlessly inside the Editor.**
 
 ```
-┌──────────────────────────────────┐
-│        Unity Editor              │
-│  ┌────────────────────────────┐  │     WebSocket      ┌──────────────┐     MCP(stdio)     ┌─────────────┐
-│  │   Error Solver             │  │◄─────────────────► │  Node.js     │◄──────────────────►│  AI Coding  │
-│  │   Shader Inspector         │  │   localhost:8090   │  MCP Server  │                    │  Assistant  │
-│  └────────────────────────────┘  │                    └──────────────┘                    └─────────────┘
-│                                  │                           ▲
-│  Server auto-starts when any     │                           │ stdio
-│  tool window opens               │                    ┌──────┴───────┐
-└──────────────────────────────────┘                    │  shader-ls   │
-                                                        │  (LSP Server)│
-                                                        └──────────────┘
+┌──────────────────────────────────────┐
+│          Unity Editor                │
+│  ┌────────────────────────────────┐  │   spawn per request   ┌──────────────────────┐
+│  │   Error Solver                 │  │ ────────────────────► │  node headless.mjs   │
+│  │   Shader Inspector             │  │   stdin JSON          │  (Server~/)          │
+│  │   Frame Debugger AI            │  │ ◄──────────────────── │  Claude Agent SDK    │
+│  │   AI Chat / Image Gen          │  │   stdout JSON lines   └──────────────────────┘
+│  │   SVN Tool                     │  │
+│  └────────────────────────────────┘  │
+│   Everything ships inside the        │
+│   Unity package — no MCP, no npm     │
+└──────────────────────────────────────┘
 ```
 
 ---
@@ -39,14 +39,44 @@ https://github.com/user-attachments/assets/afc01579-e968-4505-81ac-1c56985d0e70
 - **AI Chat 탭** — 셰이더 컨텍스트 기반 자유 대화
 - **Include Graph** — #include 의존성 그래프 시각화
 
+### Frame Debugger AI *(v0.11.0)*
+AI 기반 프레임 디버깅 도구. Unity Frame Debugger 데이터를 AI가 분석하여 렌더링 병목과 배치 브레이크 원인을 찾아줍니다.
+
+- **Overview 탭** — 프레임 요약: 이벤트 수, 버텍스/인덱스 카운트, 이벤트 타입 히스토그램, 핫스팟 Top-12, 셰이더별 통계, 배치 브레이크 원인 분석
+- **Events 탭** — 전체 프레임 이벤트 목록, 클릭하면 셰이더/패스/렌더 스테이트 상세 조회
+- **Compare 탭** — 두 이벤트 간 diff 비교 (셰이더, 키워드 변경, 렌더 스테이트 차이, 배치 브레이크 전환)
+- **AI Chat 탭** — 프레임 데이터 컨텍스트 기반 AI 질의 ("이 드로우콜이 왜 느린가요?")
+- **Tiki-Taka 워크플로우** — Summary → Search → Detail/Compare → RT Snapshot 순으로 AI가 단계적 분석
+
+### AI Chat & Image Generation *(v0.6.0 ~ v0.9.0)*
+독립 AI 채팅 윈도우 + AI 이미지 생성 기능.
+
+- **AI Chat** — Unity 프로젝트 컨텍스트 기반 자유 대화, 에셋 첨부, 대화 히스토리 지원
+- **Image Gen 모드** — Claude가 프롬프트를 최적화한 뒤 이미지 생성
+- **Nano Banana (Gemini)** — Google Gemini API 기반 이미지 생성, 레퍼런스 이미지 편집 지원
+- **ComfyUI (Local)** — 로컬 ComfyUI 서버 연동으로 txt2img / img2img 지원
+- **생성 이미지 저장** — `Assets/GeneratedImages/`에 프로젝트 에셋으로 저장
+
+### SVN Tool *(v0.10.0)*
+Unity 에디터 내 SVN 버전 관리 통합 도구.
+
+- **History 탭** — 파일별 SVN 로그 조회 (최대 50개 리비전), 리비전별 diff, AI 변경사항 설명
+- **Operations 탭** — 프로젝트 전체 `svn status`, 파일 다중 선택, 커밋/리버트/업데이트 일괄 실행
+
+### Shader Include Graph (Standalone) *(v0.10.0)*
+별도 의존성 없이 어떤 Unity 프로젝트에든 드롭인 가능한 셰이더 #include 그래프 시각화 도구.
+
+- **인터랙티브 그래프** — 팬/줌, 노드 클릭으로 파일 정보 조회
+- **파일 분석 패널** — Properties, Keywords, Functions, Structs, Defines 토글 표시
+- `standalone-tools/GrShaderIncludeGraph/` 폴더를 프로젝트 `Editor/` 폴더에 복사하여 사용
+
 ---
 
 ## Requirements
 
 - **Unity** 2021.3 LTS 이상
-- **Node.js** 18+
-- **Claude Code** 설치 및 인증 (Solve 기능은 [Claude Agent SDK](https://www.npmjs.com/package/@anthropic-ai/claude-agent-sdk) 사용)
-- **.NET 7.0+ SDK** (선택, LSP 기능용)
+- **Node.js** 18+ (로컬 설치만 돼 있으면 됨 — 경로 자동 탐지)
+- **Claude Code** 설치 및 인증 ([Claude Agent SDK](https://www.npmjs.com/package/@anthropic-ai/claude-agent-sdk) 를 내부 번들로 동봉)
 
 ---
 
@@ -61,86 +91,22 @@ https://github.com/KULEEEE/Unity-Agent-For-Claude-Code.git?path=unity-package
 
 ### 방법 2: 로컬 폴더
 
-ZIP 다운로드 후 `unity-package/` 폴더를 Unity 프로젝트의 `Packages/UnityAgent/`에 복사:
+ZIP 다운로드 후 `unity-package/` 폴더를 Unity 프로젝트의 `Packages/UnityAgent/`에 복사. 번들된 헤드리스 런너(`Server~/`)가 함께 따라와야 합니다.
+
 ```
 Packages/
   UnityAgent/
     package.json
-    Editor/
-      UnityAgentServer.cs
-      ErrorCollector.cs
-      ErrorSolverWindow.cs
-      ...
+    Editor/          ← Unity가 임포트하는 C# 코드
     Runtime/
-      AssemblyInfo.cs
+    Server~/         ← Unity가 무시 (헤드리스 런너 번들 + node_modules)
 ```
 
 ### 방법 3: 디스크에서 추가
 
 Package Manager → `+` → **Add package from disk** → `unity-package/package.json` 선택
 
----
-
-## MCP Server 설정
-
-npm에 퍼블리시된 [`unity-agent-tools`](https://www.npmjs.com/package/unity-agent-tools) 패키지를 사용합니다. AI 어시스턴트 설정에 추가하세요.
-
-### Claude Code
-
-`.mcp.json` (프로젝트 루트 또는 `~/.claude/.mcp.json`):
-
-**macOS / Linux:**
-```json
-{
-  "mcpServers": {
-    "unity-agent": {
-      "command": "npx",
-      "args": ["-y", "unity-agent-tools"]
-    }
-  }
-}
-```
-
-**Windows:**
-```json
-{
-  "mcpServers": {
-    "unity-agent": {
-      "command": "cmd",
-      "args": ["/c", "npx", "-y", "unity-agent-tools"]
-    }
-  }
-}
-```
-
-### Cursor
-
-`.cursor/mcp.json`:
-```json
-{
-  "mcpServers": {
-    "unity-agent": {
-      "command": "npx",
-      "args": ["-y", "unity-agent-tools"]
-    }
-  }
-}
-```
-
-### OpenCode
-
-`opencode.json`:
-```json
-{
-  "mcp": {
-    "unity-agent": {
-      "type": "local",
-      "command": ["npx", "-y", "unity-agent-tools"],
-      "enabled": true
-    }
-  }
-}
-```
+> 별도의 npm 설치, `.mcp.json`, MCP 서버 설정이 전혀 필요하지 않습니다. Unity 패키지 하나로 끝.
 
 ---
 
@@ -164,95 +130,72 @@ npm에 퍼블리시된 [`unity-agent-tools`](https://www.npmjs.com/package/unity
 3. 로컬 분석 (Compile, Variants, Properties) 또는 AI 분석 실행
 4. AI Chat 탭에서 셰이더 관련 자유 질문
 
-### AI 어시스턴트에서 직접 사용
+### Frame Debugger AI
 
-MCP 설정 후 AI 어시스턴트에서 자연어로 요청:
-```
-"Unity 프로젝트에서 에러 목록 보여줘"
+1. **Tools** → **Unity Agent** → **Frame Debugger AI** 열기
+2. **Capture Frame** 클릭 → Unity Frame Debugger 자동 활성화 + 데이터 수집
+3. Overview 탭에서 핫스팟/배치 브레이크 확인
+4. Events 탭에서 이벤트 상세 조회, Compare 탭에서 두 이벤트 비교
+5. **Ask AI** 버튼 또는 AI Chat 탭에서 분석 요청
 
-"Assets/Scripts/Player.cs 파일 읽어줘"
+### AI Chat & Image Gen
 
-"이 셰이더 컴파일하고 에러 확인해줘"
+1. **Tools** → **Unity Agent** → **AI Chat** 열기
+2. Chat 모드에서 자유 질문, Image Gen 모드에서 이미지 생성
+3. 백엔드 선택: Nano Banana (Gemini) 또는 ComfyUI (Local)
+4. 레퍼런스 이미지 첨부 가능, 생성 이미지는 프로젝트에 저장
 
-"프로젝트 셰이더 목록 보여줘"
-```
+### SVN Tool
 
----
-
-## Tools
-
-### Error Solver Tools
-
-| Tool | Description |
-|------|-------------|
-| `get_unity_errors` | Unity 콘솔 에러/경고 조회 |
-| `read_project_file` | Unity 프로젝트 파일 읽기 |
-| `write_project_file` | Unity 프로젝트 파일 쓰기 (자동 recompile) |
-| `list_project_files` | 프로젝트 파일 목록 조회 |
-
-### Shader Tools
-
-| Tool | Description |
-|------|-------------|
-| `compile_shader` | 셰이더 컴파일, 에러/경고 반환 |
-| `analyze_shader_variants` | 키워드 조합 및 배리언트 수 분석 |
-| `get_shader_properties` | 셰이더 프로퍼티 목록 |
-| `get_shader_code` | 셰이더 소스 코드 (include 해석 포함) |
-| `get_material_info` | 머티리얼 상세 정보 |
-| `list_shaders` | 프로젝트 셰이더 목록 |
-
-### LSP Tools
-
-| Tool | Description |
-|------|-------------|
-| `shader_hover` | 심볼 타입/문서 정보 |
-| `shader_completion` | 코드 자동완성 |
-| `shader_signature_help` | 함수 시그니처 도움말 |
-| `shader_diagnostics` | 셰이더 진단 |
-
-### Resources
-
-| Resource URI | Description |
-|-------------|-------------|
-| `unity://pipeline/info` | 렌더 파이프라인 정보 |
-| `unity://shader/includes` | Include 파일 목록 |
-| `unity://shader/keywords` | 셰이더 키워드 목록 |
-| `unity://editor/platform` | 빌드 타겟 및 플랫폼 정보 |
+1. **Tools** → **Unity Agent** → **SVN Tool** 열기
+2. History 탭: 파일 선택 → SVN 로그 조회 → diff + AI 설명
+3. Operations 탭: 파일 선택 → 커밋/리버트/업데이트
 
 ---
 
 ## Architecture
 
 ```
-Unity Editor (C#)                    Node.js MCP Server
-├── UnityAgentServer.cs              ├── index.ts (entry point)
-│   WebSocket server (:8090)         ├── unity-bridge.ts (WebSocket client)
-│   Auto-start on tool open          ├── ai-handler.ts (Claude Agent SDK)
-├── ErrorCollector.cs                ├── lsp-client.ts (shader-ls)
-│   Console log capture              ├── tools/
-├── ErrorSolverWindow.cs             │   ├── get-unity-errors.ts
-│   Error list + Solve button        │   ├── read-project-file.ts
-├── ShaderInspectorWindow.cs         │   ├── write-project-file.ts
-│   Shader/Material/AI tabs          │   ├── list-project-files.ts
-├── ShaderAnalyzer.cs                │   ├── shader-compile.ts
-├── MaterialInspector.cs             │   ├── shader-analyze.ts
-├── AIRequestHandler.cs              │   └── ... (13 tools total)
-├── MarkdownRenderer.cs              └── resources/ (4 resources)
-└── JsonHelper.cs
+Unity Editor (C#)                              Bundled Node runner (Server~/)
+├── UnityAgentServer.cs                        ├── headless.mjs
+│   Locate Node.js, readiness probe            │   stdin JSON → Claude Agent SDK query()
+├── AIRequestHandler.cs                        │   stdout JSON lines (status/chunk/image/result)
+│   Spawn headless.mjs per AI request          │
+│   Pipe prompt JSON to stdin                  ├── mcp-tools.mjs
+│   Parse stdout JSON lines on main thread     │   Internal stdio MCP — only generate_image
+├── ErrorCollector.cs                          │   Spawned as child of headless by SDK
+│   Console log capture                        │
+├── ErrorSolverWindow.cs                       └── node_modules/
+│   Error list + Solve button                      @anthropic-ai/claude-agent-sdk
+├── ShaderInspectorWindow.cs
+│   Shader/Material/AI tabs
+├── FrameDebuggerAIWindow.cs                   Server~ 폴더는 Unity가 무시 (이름이 ~ 로 끝남)
+│   Overview/Events/Compare/AI Chat            → 에셋으로 임포트되지 않고 .meta 도 생기지 않음
+├── FrameDebugBridge.cs
+│   FD reflection (Unity 2019~6)
+├── AIChatWindow.cs
+│   AI Chat + Image Gen
+├── SVNToolWindow.cs
+│   SVN History + Operations
+└── NanoBananaReceiver.cs
+    이미지 수신 → AI Chat 창에 표시
 ```
 
 ### 통신 흐름
 
-**Error Solver (Solve 버튼):**
+**모든 AI 요청 (Solve / AI Chat / Frame Debugger AI / Shader AI):**
 ```
-Error Solver UI → AIRequestHandler → WebSocket → MCP Server
-→ Claude Agent SDK → Claude API → 파일 읽기/수정 → 결과 스트리밍
+Unity UI → AIRequestHandler → node headless.mjs (spawn)
+  → Claude Agent SDK query() → Claude Code headless
+  → stdout JSON lines → AIRequestHandler 메인 스레드 디스패치
 ```
 
-**AI 어시스턴트 직접 사용:**
+**Image Generation:**
 ```
-AI Assistant → MCP(stdio) → MCP Server → WebSocket → Unity Editor
-→ 에러 조회 / 파일 읽기 / 셰이더 분석 → 응답
+AI Chat UI → image/enhance → headless.mjs → Claude (프롬프트 최적화)
+  → mcp-tools.mjs.generate_image → Gemini / ComfyUI
+  → 임시 디렉토리에 결과 저장 → headless.mjs stdout image 이벤트
+  → NanoBananaReceiver → AI Chat 창
 ```
 
 ---
@@ -260,21 +203,26 @@ AI Assistant → MCP(stdio) → MCP Server → WebSocket → Unity Editor
 ## Troubleshooting
 
 ### AI Offline 표시
-- 툴 창을 닫았다 다시 열어보세요 (서버 재시작)
-- Node.js 18+가 설치되어 있는지 확인
-- `npx -y unity-agent-tools` 가 터미널에서 실행되는지 확인
+- Node.js 18+ 설치 여부 확인 (`node --version`)
+- 커스텀 설치 경로를 쓴다면 `EditorPrefs` 의 `UnityAgent_NodeDir` 키에 Node 폴더 경로 지정
+- `Packages/com.unity-agent/Server~/headless.mjs` 파일이 존재하는지 확인 (없다면 패키지가 올바르게 설치되지 않은 것)
 
 ### 에러 목록이 안 보임
 - **Clear** 버튼으로 기존 에러 초기화 후 새 에러 발생시키기
 - **Refresh** 버튼 클릭
 
-### Domain Reload 후 연결 끊김
-- MCP 서버가 3초마다 자동 재연결 시도
-- Enter Play Mode Settings에서 Reload Domain 비활성화하면 방지 가능
+### Frame Debugger 관련
+- **Capture 안 됨** — Unity Frame Debugger 창이 열려 있어야 합니다. Capture Frame 버튼이 자동으로 열어줍니다
+- **이벤트 로딩 느림** — 이벤트가 많을수록 캐싱에 시간 소요, 프로그레스 바로 진행 확인
+- **Unity 6 호환** — FrameDebugBridge가 리플렉션 기반으로 Unity 2019~6 버전 자동 대응
 
-### 포트 충돌
-- 기본 포트: 8090
-- 다른 프로세스가 사용 중이면 Unity 콘솔에 에러 표시
+### Image Generation 관련
+- **Gemini API Key** — AI Chat 창의 Image Gen 모드에서 설정
+- **ComfyUI 연결 실패** — `http://127.0.0.1:8188`에 ComfyUI 서버가 실행 중인지 확인
+
+### SVN Tool 관련
+- **SVN 명령어 실패** — `svn --version`이 터미널에서 동작하는지 확인
+- **커스텀 SVN 경로** — EditorPrefs의 `UnityAgent_SvnPath` 키로 설정 가능
 
 ---
 
